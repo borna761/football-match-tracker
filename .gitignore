@@ -1,0 +1,7 @@
+config.js
+.DS_Store
+icons/brazuca_orig.jpg
+icons/brazuca_cropped.jpg
+icons/brazuca.svg.png
+icons/brazuca.svg
+generate-icon.js
