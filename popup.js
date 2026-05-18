@@ -205,7 +205,7 @@ function renderMatch(match, fotmobData) {
 
 async function renderMatches(matches) {
   const container = document.getElementById("matches-container");
-  container.innerHTML = "";
+  const isRefresh = container.children.length > 0 && !container.querySelector("#loading");
 
   const todayStr = isoDate(new Date());
   const yesterdayStr = isoDate(new Date(Date.now() - 86400000));
@@ -226,16 +226,23 @@ async function renderMatches(matches) {
   chrome.action.setBadgeText({ text: todayCount > 0 ? String(todayCount) : "" });
   chrome.action.setBadgeBackgroundColor({ color: "#f97316" });
 
+  // Do all async work before touching the DOM
+  const fotmobMap = visible.length > 0
+    ? await fetchFotmobUrls([...new Set(visible.map((m) => isoDate(new Date(m.utcDate))))])
+    : {};
+
+  // Build new content off-screen in a fragment
+  const fragment = document.createDocumentFragment();
+
   if (visible.length === 0) {
     const el = document.createElement("div");
     el.className = "no-matches";
     el.textContent = "No matches yesterday or in the next 60 days.";
-    container.appendChild(el);
-    return;
+    fragment.appendChild(el);
+    container.innerHTML = "";
+    container.appendChild(fragment);
+    return false;
   }
-
-  const uniqueDates = [...new Set(visible.map((m) => isoDate(new Date(m.utcDate))))];
-  const fotmobMap = await fetchFotmobUrls(uniqueDates);
 
   const yesterday = visible.filter((m) => isoDate(new Date(m.utcDate)) === yesterdayStr);
   const today     = visible.filter((m) => isoDate(new Date(m.utcDate)) === todayStr);
@@ -248,7 +255,7 @@ async function renderMatches(matches) {
       const header = document.createElement("div");
       header.className = "section-header";
       header.textContent = label;
-      container.appendChild(header);
+      fragment.appendChild(header);
       anchor = header;
     }
     let currentKey = null;
@@ -263,11 +270,11 @@ async function renderMatches(matches) {
           span.className = "date-label";
           span.textContent = formatDateLabel(match.utcDate);
           group.appendChild(span);
-          container.appendChild(group);
+          fragment.appendChild(group);
           if (!anchor) anchor = group;
         }
       }
-      container.appendChild(renderMatch(match, getFotmobData(match, fotmobMap)));
+      fragment.appendChild(renderMatch(match, getFotmobData(match, fotmobMap)));
     }
     return anchor;
   }
@@ -276,9 +283,16 @@ async function renderMatches(matches) {
   const todayHeader    = appendSection("Today", today);
   const upcomingAnchor = appendSection(null, upcoming, { subgroups: true });
 
-  const scrollTarget = todayHeader ?? upcomingAnchor;
-  if (scrollTarget) {
-    requestAnimationFrame(() => scrollTarget.scrollIntoView({ block: "start" }));
+  // Atomic swap — no flash
+  container.innerHTML = "";
+  container.appendChild(fragment);
+
+  // Only scroll on first render, not on live refreshes
+  if (!isRefresh) {
+    const scrollTarget = todayHeader ?? upcomingAnchor;
+    if (scrollTarget) {
+      requestAnimationFrame(() => scrollTarget.scrollIntoView({ block: "start" }));
+    }
   }
 
   return visible.some((m) => m.status === "IN_PLAY" || m.status === "PAUSED");
