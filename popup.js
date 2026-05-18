@@ -250,6 +250,8 @@ async function renderMatches(matches) {
   if (scrollTarget) {
     requestAnimationFrame(() => scrollTarget.scrollIntoView({ block: "start" }));
   }
+
+  return visible.some((m) => m.status === "IN_PLAY" || m.status === "PAUSED");
 }
 
 function renderCrests() {
@@ -270,14 +272,29 @@ function showError(msg) {
 }
 
 // ── Init ─────────────────────────────────────────────────────────────────────
+let _liveTimer = null;
+
+// Re-render every 30s using cached match data (only re-fetches FotMob live scores)
+async function scheduleLiveRefresh(cachedMatches) {
+  clearTimeout(_liveTimer);
+  _liveTimer = setTimeout(async () => {
+    try {
+      const stillLive = await renderMatches(cachedMatches);
+      if (stillLive) scheduleLiveRefresh(cachedMatches);
+    } catch { /* silently skip failed live refresh */ }
+  }, 30_000);
+}
+
 async function load() {
+  clearTimeout(_liveTimer);
   try {
     let cache = await loadCache();
     if (!cache) {
       const matches = await fetchAllMatches();
       cache = saveCache(matches);
     }
-    await renderMatches(cache.matches);
+    const hasLive = await renderMatches(cache.matches);
+    if (hasLive) scheduleLiveRefresh(cache.matches);
   } catch (err) {
     showError(`Failed to load: ${err.message}`);
   }
