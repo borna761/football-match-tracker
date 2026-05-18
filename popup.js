@@ -20,6 +20,7 @@ const EXCLUDED_STATUSES = new Set(["POSTPONED", "CANCELLED", "SUSPENDED"]);
 // ── API ──────────────────────────────────────────────────────────────────────
 async function fetchMatches(team) {
   const from = new Date();
+  from.setDate(from.getDate() - 1);
   const to = new Date();
   to.setDate(to.getDate() + LOOKAHEAD_DAYS);
   const url = `https://api.football-data.org/v4/teams/${team.id}/matches?dateFrom=${isoDate(from)}&dateTo=${isoDate(to)}`;
@@ -181,12 +182,16 @@ async function renderMatches(matches) {
   const container = document.getElementById("matches-container");
   container.innerHTML = "";
 
-  const visible = matches.filter((m) =>
-    !EXCLUDED_STATUSES.has(m.status) &&
-    (m.status !== "FINISHED" || dateKey(m.utcDate) === dateKey(new Date().toISOString()))
-  );
-
   const todayStr = isoDate(new Date());
+  const yesterdayStr = isoDate(new Date(Date.now() - 86400000));
+
+  const visible = matches.filter((m) => {
+    if (EXCLUDED_STATUSES.has(m.status)) return false;
+    if (m.status !== "FINISHED") return true;
+    const d = isoDate(new Date(m.utcDate));
+    return d === todayStr || d === yesterdayStr;
+  });
+
   const todayCount = visible.filter((m) => isoDate(new Date(m.utcDate)) === todayStr).length;
   chrome.action.setBadgeText({ text: todayCount > 0 ? String(todayCount) : "" });
   chrome.action.setBadgeBackgroundColor({ color: "#f97316" });
@@ -194,7 +199,7 @@ async function renderMatches(matches) {
   if (visible.length === 0) {
     const el = document.createElement("div");
     el.className = "no-matches";
-    el.textContent = "No upcoming matches in the next 60 days.";
+    el.textContent = "No matches yesterday or in the next 60 days.";
     container.appendChild(el);
     return;
   }
@@ -202,20 +207,43 @@ async function renderMatches(matches) {
   const uniqueDates = [...new Set(visible.map((m) => isoDate(new Date(m.utcDate))))];
   const fotmobMap = await fetchFotmobUrls(uniqueDates);
 
-  let currentKey = null;
-  for (const match of visible) {
-    const key = dateKey(match.utcDate);
-    if (key !== currentKey) {
-      currentKey = key;
-      const group = document.createElement("div");
-      group.className = "date-group";
-      const label = document.createElement("span");
-      label.className = "date-label";
-      label.textContent = formatDateLabel(match.utcDate);
-      group.appendChild(label);
-      container.appendChild(group);
+  const yesterday = visible.filter((m) => isoDate(new Date(m.utcDate)) === yesterdayStr);
+  const today     = visible.filter((m) => isoDate(new Date(m.utcDate)) === todayStr);
+  const upcoming  = visible.filter((m) => isoDate(new Date(m.utcDate)) > todayStr);
+
+  function appendSection(label, sectionMatches, { subgroups = false } = {}) {
+    if (sectionMatches.length === 0) return null;
+    const header = document.createElement("div");
+    header.className = "section-header";
+    header.textContent = label;
+    container.appendChild(header);
+    let currentKey = null;
+    for (const match of sectionMatches) {
+      if (subgroups) {
+        const key = dateKey(match.utcDate);
+        if (key !== currentKey) {
+          currentKey = key;
+          const group = document.createElement("div");
+          group.className = "date-group";
+          const span = document.createElement("span");
+          span.className = "date-label";
+          span.textContent = formatDateLabel(match.utcDate);
+          group.appendChild(span);
+          container.appendChild(group);
+        }
+      }
+      container.appendChild(renderMatch(match, getFotmobData(match, fotmobMap)));
     }
-    container.appendChild(renderMatch(match, getFotmobData(match, fotmobMap)));
+    return header;
+  }
+
+  appendSection("Yesterday", yesterday);
+  const todayHeader   = appendSection("Today", today);
+  const upcomingHeader = appendSection("Upcoming", upcoming, { subgroups: true });
+
+  const scrollTarget = todayHeader ?? upcomingHeader;
+  if (scrollTarget) {
+    requestAnimationFrame(() => scrollTarget.scrollIntoView({ block: "start" }));
   }
 }
 

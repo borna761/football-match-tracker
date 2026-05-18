@@ -132,6 +132,27 @@ body {
   text-decoration: underline;
 }
 
+/* ── Matches container ── */
+#matches-container {
+  max-height: 480px;
+  overflow-y: auto;
+}
+
+/* ── Section headers ── */
+.section-header {
+  padding: 10px 16px 4px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  border-top: 1px solid var(--border);
+}
+
+.section-header:first-child {
+  border-top: none;
+}
+
 /* ── Date group ── */
 .date-group {
   padding: 10px 16px 2px;
