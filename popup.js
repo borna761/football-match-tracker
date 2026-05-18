@@ -1,18 +1,15 @@
 // API_KEY is loaded from config.js (see config.example.js)
 // Pure utility functions are loaded from utils.js
 
-// IDs from football-data.org
-const TEAMS = [
-  { id: 57,  name: "Arsenal" },
-  { id: 81,  name: "Barcelona" },
-  { id: 108, name: "Inter Milan" },
-  { id: 762, name: "Argentina", national: true },
-  { id: 760, name: "Spain",     national: true },
-  { id: 792, name: "Sweden",    national: true },
-];
+// Add or remove IDs to change which teams are tracked
+const TEAM_IDS = [57, 81, 108, 762, 760, 792];
 
 const CACHE_TTL_MS = 60 * 60 * 1000;
+const TEAM_INFO_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 const LOOKAHEAD_DAYS = 60;
+
+// Populated from API/cache before first render — treat as read-only after init
+let TEAMS = [];
 
 // Statuses to exclude entirely from the list
 const EXCLUDED_STATUSES = new Set(["POSTPONED", "CANCELLED", "SUSPENDED"]);
@@ -60,8 +57,8 @@ async function fetchAllMatches() {
 }
 
 // ── Enabled teams ────────────────────────────────────────────────────────────
-const TRACKED_IDS = new Set(TEAMS.map((t) => t.id));
-let enabledTeamIds = new Set(TEAMS.map((t) => t.id)); // all on by default
+const TRACKED_IDS = new Set(TEAM_IDS);
+let enabledTeamIds = new Set(TEAM_IDS); // all on by default
 
 function loadEnabledTeams() {
   return new Promise((resolve) => {
@@ -79,7 +76,7 @@ function saveEnabledTeams() {
 }
 
 // ── Cache ────────────────────────────────────────────────────────────────────
-const TEAMS_FINGERPRINT = TEAMS.map((t) => t.id).join(",");
+const TEAMS_FINGERPRINT = TEAM_IDS.join(",");
 
 function loadCache() {
   return new Promise((resolve) => {
@@ -96,6 +93,59 @@ function saveCache(matches) {
   const cache = { matches, timestamp: Date.now(), fingerprint: TEAMS_FINGERPRINT };
   chrome.storage.local.set({ matchesCache: cache });
   return cache;
+}
+
+// ── Team info ────────────────────────────────────────────────────────────────
+async function fetchTeamInfo(id) {
+  const res = await fetch(`https://api.football-data.org/v4/teams/${id}`, {
+    headers: { "X-Auth-Token": API_KEY },
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const json = await res.json();
+  const remaining = parseInt(res.headers.get("X-Requests-Available-Minute") ?? "10", 10);
+  const resetSecs = parseInt(res.headers.get("X-RequestCounter-Reset") ?? "0", 10);
+  if (remaining <= 1 && resetSecs > 0) {
+    await new Promise((r) => setTimeout(r, resetSecs * 1000 + 200));
+  }
+  return {
+    id,
+    name:      json.name,
+    shortName: json.shortName,
+    crest:     json.crest,
+    national:  json.type === "NATIONAL",
+  };
+}
+
+function loadTeams() {
+  return new Promise((resolve) => {
+    chrome.storage.local.get("teamsCache", (data) => {
+      const cache = data.teamsCache;
+      if (!cache) return resolve(null);
+      if (cache.fingerprint !== TEAMS_FINGERPRINT) return resolve(null);
+      if (Date.now() - cache.timestamp > TEAM_INFO_TTL_MS) return resolve(null);
+      resolve(cache.teams);
+    });
+  });
+}
+
+function saveTeams(teams) {
+  chrome.storage.local.set({
+    teamsCache: { teams, timestamp: Date.now(), fingerprint: TEAMS_FINGERPRINT },
+  });
+}
+
+async function fetchAllTeams() {
+  const results = [];
+  for (const id of TEAM_IDS) {
+    try {
+      results.push(await fetchTeamInfo(id));
+    } catch (err) {
+      console.error(`Team ${id}:`, err.message);
+      // Fallback: bare object so the rest of the UI still works
+      results.push({ id, name: String(id), shortName: String(id), crest: null, national: false });
+    }
+  }
+  return results;
 }
 
 // ── Rendering ────────────────────────────────────────────────────────────────
@@ -373,7 +423,25 @@ async function load() {
 if (typeof document !== "undefined") {
   document.addEventListener("DOMContentLoaded", async () => {
     await loadEnabledTeams();
+
+    // Seed TEAMS with minimal stubs so fetchAllMatches can start immediately
+    TEAMS.push(...TEAM_IDS.map((id) => ({ id, name: String(id), shortName: String(id), crest: null, national: false })));
+
+    // Load matches right away — don't block on team metadata
+    const matchLoadPromise = load();
+
+    // Fetch team metadata (cached 7 days) in parallel
+    let freshTeams = await loadTeams();
+    if (!freshTeams) {
+      freshTeams = await fetchAllTeams();
+      saveTeams(freshTeams);
+    }
+
+    // Swap stubs for real data and render crests
+    TEAMS.length = 0;
+    TEAMS.push(...freshTeams);
     renderCrests();
-    await load();
+
+    await matchLoadPromise;
   });
 }
