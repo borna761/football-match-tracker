@@ -213,10 +213,14 @@ async function renderMatches(matches) {
 
   function appendSection(label, sectionMatches, { subgroups = false } = {}) {
     if (sectionMatches.length === 0) return null;
-    const header = document.createElement("div");
-    header.className = "section-header";
-    header.textContent = label;
-    container.appendChild(header);
+    let anchor = null;
+    if (label) {
+      const header = document.createElement("div");
+      header.className = "section-header";
+      header.textContent = label;
+      container.appendChild(header);
+      anchor = header;
+    }
     let currentKey = null;
     for (const match of sectionMatches) {
       if (subgroups) {
@@ -230,18 +234,19 @@ async function renderMatches(matches) {
           span.textContent = formatDateLabel(match.utcDate);
           group.appendChild(span);
           container.appendChild(group);
+          if (!anchor) anchor = group;
         }
       }
       container.appendChild(renderMatch(match, getFotmobData(match, fotmobMap)));
     }
-    return header;
+    return anchor;
   }
 
   appendSection("Yesterday", yesterday);
-  const todayHeader   = appendSection("Today", today);
-  const upcomingHeader = appendSection("Upcoming", upcoming, { subgroups: true });
+  const todayHeader    = appendSection("Today", today);
+  const upcomingAnchor = appendSection(null, upcoming, { subgroups: true });
 
-  const scrollTarget = todayHeader ?? upcomingHeader;
+  const scrollTarget = todayHeader ?? upcomingAnchor;
   if (scrollTarget) {
     requestAnimationFrame(() => scrollTarget.scrollIntoView({ block: "start" }));
   }
