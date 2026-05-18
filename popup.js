@@ -60,6 +60,25 @@ async function fetchAllMatches() {
   return allMatches;
 }
 
+// ── Enabled teams ────────────────────────────────────────────────────────────
+const TRACKED_IDS = new Set(TEAMS.map((t) => t.id));
+let enabledTeamIds = new Set(TEAMS.map((t) => t.id)); // all on by default
+
+function loadEnabledTeams() {
+  return new Promise((resolve) => {
+    chrome.storage.local.get("enabledTeams", (data) => {
+      if (Array.isArray(data.enabledTeams)) {
+        enabledTeamIds = new Set(data.enabledTeams.filter((id) => TRACKED_IDS.has(id)));
+      }
+      resolve();
+    });
+  });
+}
+
+function saveEnabledTeams() {
+  chrome.storage.local.set({ enabledTeams: [...enabledTeamIds] });
+}
+
 // ── Cache ────────────────────────────────────────────────────────────────────
 const TEAMS_FINGERPRINT = TEAMS.map((t) => t.id).join(",");
 
@@ -193,9 +212,14 @@ async function renderMatches(matches) {
 
   const visible = matches.filter((m) => {
     if (EXCLUDED_STATUSES.has(m.status)) return false;
-    if (m.status !== "FINISHED") return true;
-    const d = isoDate(new Date(m.utcDate));
-    return d === todayStr || d === yesterdayStr;
+    if (m.status === "FINISHED") {
+      const d = isoDate(new Date(m.utcDate));
+      if (d !== todayStr && d !== yesterdayStr) return false;
+    }
+    // show if at least one tracked+enabled team is involved
+    const homeOn = TRACKED_IDS.has(m.homeTeam.id) && enabledTeamIds.has(m.homeTeam.id);
+    const awayOn = TRACKED_IDS.has(m.awayTeam.id) && enabledTeamIds.has(m.awayTeam.id);
+    return homeOn || awayOn;
   });
 
   const todayCount = visible.filter((m) => isoDate(new Date(m.utcDate)) === todayStr).length;
@@ -279,7 +303,18 @@ function renderCrests() {
     img.src = `https://crests.football-data.org/${team.id}.svg`;
     img.alt = team.name;
     img.title = team.name;
+    img.classList.toggle("crest-off", !enabledTeamIds.has(team.id));
     img.onerror = () => img.remove();
+    img.addEventListener("click", () => {
+      if (enabledTeamIds.has(team.id)) {
+        enabledTeamIds.delete(team.id);
+      } else {
+        enabledTeamIds.add(team.id);
+      }
+      img.classList.toggle("crest-off", !enabledTeamIds.has(team.id));
+      saveEnabledTeams();
+      if (_lastMatches) renderMatches(_lastMatches);
+    });
     container.appendChild(img);
   }
 }
@@ -290,6 +325,7 @@ function showError(msg) {
 
 // ── Init ─────────────────────────────────────────────────────────────────────
 let _liveTimer = null;
+let _lastMatches = null;
 
 // Re-render every 30s using cached match data (only re-fetches FotMob live scores)
 async function scheduleLiveRefresh(cachedMatches) {
@@ -310,6 +346,7 @@ async function load() {
       const matches = await fetchAllMatches();
       cache = saveCache(matches);
     }
+    _lastMatches = cache.matches;
     const hasLive = await renderMatches(cache.matches);
     if (hasLive) scheduleLiveRefresh(cache.matches);
   } catch (err) {
@@ -317,5 +354,8 @@ async function load() {
   }
 }
 
-renderCrests();
-document.addEventListener("DOMContentLoaded", () => load());
+document.addEventListener("DOMContentLoaded", async () => {
+  await loadEnabledTeams();
+  renderCrests();
+  await load();
+});
