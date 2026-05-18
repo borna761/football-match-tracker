@@ -1,4 +1,5 @@
 // API_KEY is loaded from config.js (see config.example.js)
+// Pure utility functions are loaded from utils.js
 
 // IDs from football-data.org — Inter Miami not available on free tier
 const TEAMS = [
@@ -13,9 +14,10 @@ const TEAMS = [
 const CACHE_TTL_MS = 60 * 60 * 1000;
 const LOOKAHEAD_DAYS = 60;
 
-// ── API ──────────────────────────────────────────────────────────────────────
-function isoDate(d) { return d.toISOString().slice(0, 10); }
+// Statuses to exclude entirely from the list
+const EXCLUDED_STATUSES = new Set(["POSTPONED", "CANCELLED", "SUSPENDED"]);
 
+// ── API ──────────────────────────────────────────────────────────────────────
 async function fetchMatches(team) {
   const from = new Date();
   const to = new Date();
@@ -35,12 +37,10 @@ async function fetchMatches(team) {
 async function fetchAllMatches() {
   const allMatches = [];
   const seen = new Set();
-  const debugLines = [];
 
   for (const team of TEAMS) {
     try {
       const { matches, remaining, resetSecs } = await fetchMatches(team);
-      debugLines.push(`${team.name}: ${matches.length} match(es)`);
       for (const match of matches) {
         if (!seen.has(match.id)) {
           seen.add(match.id);
@@ -51,17 +51,9 @@ async function fetchAllMatches() {
         await new Promise((r) => setTimeout(r, resetSecs * 1000 + 200));
       }
     } catch (err) {
-      debugLines.push(`${team.name}: ERR — ${err.message}`);
+      console.error(`${team.name}:`, err.message);
     }
   }
-
-  const existing = document.getElementById("debug-output");
-  if (existing) existing.remove();
-  const dbg = document.createElement("pre");
-  dbg.id = "debug-output";
-  dbg.style.cssText = "font-size:10px;color:#64748b;padding:8px 16px;white-space:pre-wrap;border-top:1px solid rgba(255,255,255,0.05)";
-  dbg.textContent = debugLines.join("\n");
-  document.getElementById("app").appendChild(dbg);
 
   allMatches.sort((a, b) => new Date(a.utcDate) - new Date(b.utcDate));
   return allMatches;
@@ -84,22 +76,6 @@ function saveCache(matches) {
 }
 
 // ── Rendering ────────────────────────────────────────────────────────────────
-function formatTime(dateStr) {
-  return new Date(dateStr).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
-}
-
-function formatDateLabel(dateStr) {
-  const d = new Date(dateStr);
-  const today = new Date();
-  const tomorrow = new Date();
-  tomorrow.setDate(today.getDate() + 1);
-  if (d.toDateString() === today.toDateString()) return "Today";
-  if (d.toDateString() === tomorrow.toDateString()) return "Tomorrow";
-  return d.toLocaleDateString([], { weekday: "long", month: "short", day: "numeric" });
-}
-
-function dateKey(dateStr) { return new Date(dateStr).toDateString(); }
-
 function logoEl(team) {
   if (!team.crest) {
     const div = document.createElement("div");
@@ -130,8 +106,10 @@ function teamEl(team, side) {
 }
 
 function renderMatch(match) {
-  const isLive = ["IN_PLAY", "PAUSED"].includes(match.status);
-  const isFinished = match.status === "FINISHED";
+  const { status, score } = match;
+  const isLive     = status === "IN_PLAY";
+  const isHalfTime = status === "PAUSED";
+  const isFinished = status === "FINISHED";
 
   const row = document.createElement("div");
   row.className = "match-row";
@@ -139,13 +117,32 @@ function renderMatch(match) {
   const center = document.createElement("div");
   center.className = "match-time";
 
-  if (isLive || isFinished) {
-    const score = document.createElement("div");
-    score.className = isLive ? "match-score live" : "match-score";
-    const h = match.score.fullTime.home ?? "?";
-    const a = match.score.fullTime.away ?? "?";
-    score.textContent = `${h} – ${a}`;
-    center.appendChild(score);
+  if (isFinished) {
+    // fullTime is always populated on FINISHED matches
+    const ft = score.fullTime;
+    const scoreEl = document.createElement("div");
+    scoreEl.className = "match-score";
+    scoreEl.textContent = `${ft.home ?? "?"} – ${ft.away ?? "?"}`;
+    center.appendChild(scoreEl);
+  } else if (isHalfTime) {
+    // PAUSED = half-time; show HT badge + half-time score
+    const badge = document.createElement("div");
+    badge.className = "live-badge";
+    badge.textContent = "HT";
+    center.appendChild(badge);
+    const ht = score.halfTime;
+    if (ht && ht.home !== null) {
+      const scoreEl = document.createElement("div");
+      scoreEl.className = "match-score";
+      scoreEl.textContent = `${ht.home} – ${ht.away}`;
+      center.appendChild(scoreEl);
+    }
+  } else if (isLive) {
+    // Live score not available on free tier — show LIVE badge only
+    const badge = document.createElement("div");
+    badge.className = "live-badge";
+    badge.textContent = "LIVE";
+    center.appendChild(badge);
   } else {
     const time = document.createElement("div");
     time.className = "match-time-value";
@@ -168,9 +165,12 @@ function renderMatches(matches) {
   const container = document.getElementById("matches-container");
   container.innerHTML = "";
 
-  const upcoming = matches.filter((m) => m.status !== "FINISHED" || isToday(m.utcDate));
+  const visible = matches.filter((m) =>
+    !EXCLUDED_STATUSES.has(m.status) &&
+    (m.status !== "FINISHED" || dateKey(m.utcDate) === dateKey(new Date().toISOString()))
+  );
 
-  if (upcoming.length === 0) {
+  if (visible.length === 0) {
     const el = document.createElement("div");
     el.className = "no-matches";
     el.textContent = "No upcoming matches in the next 60 days.";
@@ -179,7 +179,7 @@ function renderMatches(matches) {
   }
 
   let currentKey = null;
-  for (const match of upcoming) {
+  for (const match of visible) {
     const key = dateKey(match.utcDate);
     if (key !== currentKey) {
       currentKey = key;
@@ -193,10 +193,6 @@ function renderMatches(matches) {
     }
     container.appendChild(renderMatch(match));
   }
-}
-
-function isToday(dateStr) {
-  return new Date(dateStr).toDateString() === new Date().toDateString();
 }
 
 function setLastUpdated(timestamp) {

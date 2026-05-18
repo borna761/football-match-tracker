@@ -228,6 +228,14 @@ body {
   letter-spacing: 0.05em;
 }
 
+.live-badge {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: #f97316;
+  text-transform: uppercase;
+}
+
 .match-league {
   font-size: 10px;
   color: var(--text-dim);
