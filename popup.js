@@ -202,22 +202,29 @@ function renderMatch(match, fotmobData) {
   return row;
 }
 
+// Pure function — exported for testing
+function filterMatches(matches, todayStr, trackedIds, enabledIds) {
+  return matches.filter((m) => {
+    if (EXCLUDED_STATUSES.has(m.status)) return false;
+    if (m.status === "FINISHED") {
+      if (isoDate(new Date(m.utcDate)) !== todayStr) return false;
+    }
+    const homeOn = trackedIds.has(m.homeTeam.id) && enabledIds.has(m.homeTeam.id);
+    const awayOn = trackedIds.has(m.awayTeam.id) && enabledIds.has(m.awayTeam.id);
+    return homeOn || awayOn;
+  });
+}
+
+if (typeof module !== "undefined") {
+  module.exports = { filterMatches };
+}
+
 async function renderMatches(matches) {
   const container = document.getElementById("matches-container");
   const isRefresh = container.children.length > 0 && !container.querySelector("#loading");
 
   const todayStr = isoDate(new Date());
-
-  const visible = matches.filter((m) => {
-    if (EXCLUDED_STATUSES.has(m.status)) return false;
-    if (m.status === "FINISHED") {
-      if (isoDate(new Date(m.utcDate)) !== todayStr) return false;
-    }
-    // show if at least one tracked+enabled team is involved
-    const homeOn = TRACKED_IDS.has(m.homeTeam.id) && enabledTeamIds.has(m.homeTeam.id);
-    const awayOn = TRACKED_IDS.has(m.awayTeam.id) && enabledTeamIds.has(m.awayTeam.id);
-    return homeOn || awayOn;
-  });
+  const visible = filterMatches(matches, todayStr, TRACKED_IDS, enabledTeamIds);
 
   const todayCount = visible.filter((m) => isoDate(new Date(m.utcDate)) === todayStr).length;
   chrome.action.setBadgeText({ text: todayCount > 0 ? String(todayCount) : "" });
@@ -363,8 +370,10 @@ async function load() {
   }
 }
 
-document.addEventListener("DOMContentLoaded", async () => {
-  await loadEnabledTeams();
-  renderCrests();
-  await load();
-});
+if (typeof document !== "undefined") {
+  document.addEventListener("DOMContentLoaded", async () => {
+    await loadEnabledTeams();
+    renderCrests();
+    await load();
+  });
+}
