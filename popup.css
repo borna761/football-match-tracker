@@ -53,10 +53,16 @@ body {
 /* ── Header ── */
 #header {
   display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 12px 16px 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+#header-top {
+  display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 14px 16px 12px;
-  border-bottom: 1px solid var(--border);
 }
 
 .header-title {
@@ -229,13 +235,6 @@ body {
   letter-spacing: 0.05em;
   text-align: center;
   white-space: nowrap;
-}
-
-/* ── Footer ── */
-#footer {
-  padding: 8px 16px;
-  border-top: 1px solid var(--border-subtle);
-  min-height: 28px;
 }
 
 #last-updated {
