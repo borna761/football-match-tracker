@@ -105,7 +105,8 @@ function teamEl(team, side) {
   return el;
 }
 
-function renderMatch(match) {
+function renderMatch(match, fotmobData) {
+  const fotmobUrl = fotmobData?.url ?? fotmobData;
   const { status, score } = match;
   const isLive     = status === "IN_PLAY";
   const isHalfTime = status === "PAUSED";
@@ -113,6 +114,10 @@ function renderMatch(match) {
 
   const row = document.createElement("div");
   row.className = "match-row";
+  if (fotmobUrl) {
+    row.classList.add("match-row--link");
+    row.addEventListener("click", () => chrome.tabs.create({ url: fotmobUrl }));
+  }
 
   const center = document.createElement("div");
   center.className = "match-time";
@@ -138,11 +143,22 @@ function renderMatch(match) {
       center.appendChild(scoreEl);
     }
   } else if (isLive) {
-    // Live score not available on free tier — show LIVE badge only
-    const badge = document.createElement("div");
-    badge.className = "live-badge";
-    badge.textContent = "LIVE";
-    center.appendChild(badge);
+    const liveData = fotmobData?.live;
+    if (liveData && liveData.home !== null && liveData.away !== null) {
+      const scoreEl = document.createElement("div");
+      scoreEl.className = "match-score live";
+      scoreEl.textContent = `${liveData.home} – ${liveData.away}`;
+      center.appendChild(scoreEl);
+      const minuteEl = document.createElement("div");
+      minuteEl.className = "live-badge";
+      minuteEl.textContent = liveData.minute ?? "LIVE";
+      center.appendChild(minuteEl);
+    } else {
+      const badge = document.createElement("div");
+      badge.className = "live-badge";
+      badge.textContent = "LIVE";
+      center.appendChild(badge);
+    }
   } else {
     const time = document.createElement("div");
     time.className = "match-time-value";
@@ -161,7 +177,7 @@ function renderMatch(match) {
   return row;
 }
 
-function renderMatches(matches) {
+async function renderMatches(matches) {
   const container = document.getElementById("matches-container");
   container.innerHTML = "";
 
@@ -170,6 +186,11 @@ function renderMatches(matches) {
     (m.status !== "FINISHED" || dateKey(m.utcDate) === dateKey(new Date().toISOString()))
   );
 
+  const todayStr = isoDate(new Date());
+  const todayCount = visible.filter((m) => isoDate(new Date(m.utcDate)) === todayStr).length;
+  chrome.action.setBadgeText({ text: todayCount > 0 ? String(todayCount) : "" });
+  chrome.action.setBadgeBackgroundColor({ color: "#f97316" });
+
   if (visible.length === 0) {
     const el = document.createElement("div");
     el.className = "no-matches";
@@ -177,6 +198,9 @@ function renderMatches(matches) {
     container.appendChild(el);
     return;
   }
+
+  const uniqueDates = [...new Set(visible.map((m) => isoDate(new Date(m.utcDate))))];
+  const fotmobMap = await fetchFotmobUrls(uniqueDates);
 
   let currentKey = null;
   for (const match of visible) {
@@ -191,7 +215,7 @@ function renderMatches(matches) {
       group.appendChild(label);
       container.appendChild(group);
     }
-    container.appendChild(renderMatch(match));
+    container.appendChild(renderMatch(match, getFotmobData(match, fotmobMap)));
   }
 }
 
@@ -215,7 +239,7 @@ async function load(forceRefresh = false) {
       const matches = await fetchAllMatches();
       cache = saveCache(matches);
     }
-    renderMatches(cache.matches);
+    await renderMatches(cache.matches);
     setLastUpdated(cache.timestamp);
   } catch (err) {
     showError(`Failed to load: ${err.message}`);
