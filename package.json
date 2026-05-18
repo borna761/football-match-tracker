@@ -1,0 +1,11 @@
+{
+  "name": "football-match-tracker",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "test": "TZ=UTC jest"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0"
+  }
+}
