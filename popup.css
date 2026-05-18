@@ -232,6 +232,10 @@ body {
   letter-spacing: 0.05em;
 }
 
+.match-score.live {
+  color: #f97316;
+}
+
 .live-badge {
   font-size: 10px;
   font-weight: 700;

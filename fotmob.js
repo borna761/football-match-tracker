@@ -104,26 +104,31 @@ async function fetchFotmobUrls(dates) {
         const aName = match.away?.name;
         if (!hName || !aName || !match.id) continue;
         const key = `${normalizeTeam(hName)}|${normalizeTeam(aName)}`;
-        map[key] = `https://www.fotmob.com/match/${match.id}`;
+        map[key] = {
+          url: `https://www.fotmob.com/match/${match.id}`,
+          live: match.status?.ongoing
+            ? { home: match.home?.score, away: match.away?.score, minute: match.status?.liveTime?.short ?? null }
+            : null,
+        };
       }
     }
   }));
   return map;
 }
 
-function getFotmobUrl(match, fotmobMap) {
+function getFotmobData(match, fotmobMap) {
   const hN = normalizeTeam(match.homeTeam.name);
   const aN = normalizeTeam(match.awayTeam.name);
   const direct = fotmobMap[`${hN}|${aN}`];
   if (direct) return direct;
   // Substring fallback for names like "FC Internazionale Milano" → "inter"
-  for (const [key, url] of Object.entries(fotmobMap)) {
+  for (const [key, entry] of Object.entries(fotmobMap)) {
     const [fmH, fmA] = key.split("|");
     if ((hN.includes(fmH) || fmH.includes(hN)) && (aN.includes(fmA) || fmA.includes(aN))) {
-      return url;
+      return entry;
     }
   }
   const home = match.homeTeam.shortName || match.homeTeam.name;
   const away = match.awayTeam.shortName || match.awayTeam.name;
-  return `https://www.fotmob.com/search?q=${encodeURIComponent(`${home} ${away}`)}`;
+  return { url: `https://www.fotmob.com/search?q=${encodeURIComponent(`${home} ${away}`)}`, live: null };
 }

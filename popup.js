@@ -105,7 +105,8 @@ function teamEl(team, side) {
   return el;
 }
 
-function renderMatch(match, fotmobUrl) {
+function renderMatch(match, fotmobData) {
+  const fotmobUrl = fotmobData?.url ?? fotmobData;
   const { status, score } = match;
   const isLive     = status === "IN_PLAY";
   const isHalfTime = status === "PAUSED";
@@ -142,11 +143,22 @@ function renderMatch(match, fotmobUrl) {
       center.appendChild(scoreEl);
     }
   } else if (isLive) {
-    // Live score not available on free tier — show LIVE badge only
-    const badge = document.createElement("div");
-    badge.className = "live-badge";
-    badge.textContent = "LIVE";
-    center.appendChild(badge);
+    const liveData = fotmobData?.live;
+    if (liveData && liveData.home !== null && liveData.away !== null) {
+      const scoreEl = document.createElement("div");
+      scoreEl.className = "match-score live";
+      scoreEl.textContent = `${liveData.home} – ${liveData.away}`;
+      center.appendChild(scoreEl);
+      const minuteEl = document.createElement("div");
+      minuteEl.className = "live-badge";
+      minuteEl.textContent = liveData.minute ?? "LIVE";
+      center.appendChild(minuteEl);
+    } else {
+      const badge = document.createElement("div");
+      badge.className = "live-badge";
+      badge.textContent = "LIVE";
+      center.appendChild(badge);
+    }
   } else {
     const time = document.createElement("div");
     time.className = "match-time-value";
@@ -203,7 +215,7 @@ async function renderMatches(matches) {
       group.appendChild(label);
       container.appendChild(group);
     }
-    container.appendChild(renderMatch(match, getFotmobUrl(match, fotmobMap)));
+    container.appendChild(renderMatch(match, getFotmobData(match, fotmobMap)));
   }
 }
 
