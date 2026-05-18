@@ -6,9 +6,9 @@ const TEAMS = [
   { id: 57,  name: "Arsenal" },
   { id: 81,  name: "Barcelona" },
   { id: 108, name: "Inter Milan" },
-  { id: 762, name: "Argentina" },
-  { id: 760, name: "Spain" },
-  { id: 792, name: "Sweden" },
+  { id: 762, name: "Argentina", national: true },
+  { id: 760, name: "Spain",     national: true },
+  { id: 792, name: "Sweden",    national: true },
 ];
 
 const CACHE_TTL_MS = 60 * 60 * 1000;
@@ -262,7 +262,14 @@ async function renderMatches(matches) {
 
 function renderCrests() {
   const container = document.getElementById("team-crests");
+  let dividedInserted = false;
   for (const team of TEAMS) {
+    if (team.national && !dividedInserted) {
+      const div = document.createElement("div");
+      div.className = "crest-divider";
+      container.appendChild(div);
+      dividedInserted = true;
+    }
     const img = document.createElement("img");
     img.className = "crest-logo";
     img.src = `https://crests.football-data.org/${team.id}.svg`;

@@ -68,6 +68,14 @@ body {
   object-fit: contain;
 }
 
+.crest-divider {
+  width: 1px;
+  height: 16px;
+  background: var(--border);
+  margin: 0 2px;
+  flex-shrink: 0;
+}
+
 /* ── Loading ── */
 @keyframes spin {
   to { transform: rotate(360deg); }
