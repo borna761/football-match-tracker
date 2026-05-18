@@ -21,8 +21,8 @@ describe("formatTime", () => {
     expect(formatTime("2026-05-18T09:05:00Z")).toBe("09:05");
   });
 
-  test("handles midnight", () => {
-    expect(formatTime("2026-05-18T00:00:00Z")).toBe("00:00");
+  test("formats an evening kick-off correctly", () => {
+    expect(formatTime("2026-05-18T20:45:00Z")).toBe("20:45");
   });
 });
 
