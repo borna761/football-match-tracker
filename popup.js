@@ -262,8 +262,12 @@ async function renderMatches(matches) {
 
 function renderCrests() {
   const container = document.getElementById("team-crests");
+  const sorted = [
+    ...TEAMS.filter((t) => !t.national).sort((a, b) => a.name.localeCompare(b.name)),
+    ...TEAMS.filter((t) =>  t.national).sort((a, b) => a.name.localeCompare(b.name)),
+  ];
   let dividedInserted = false;
-  for (const team of TEAMS) {
+  for (const team of sorted) {
     if (team.national && !dividedInserted) {
       const div = document.createElement("div");
       div.className = "crest-divider";
