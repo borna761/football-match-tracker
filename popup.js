@@ -8,7 +8,6 @@ const TEAMS = [
   { id: 108, name: "Inter Milan" },
   { id: 762, name: "Argentina" },
   { id: 760, name: "Spain" },
-  { id: 792, name: "Sweden" },
 ];
 
 const CACHE_TTL_MS = 60 * 60 * 1000;
