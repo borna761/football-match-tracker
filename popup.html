@@ -7,22 +7,22 @@
 <body>
   <div id="app">
     <div id="header">
-      <span class="header-title">Upcoming Matches</span>
-      <button id="refresh-btn" title="Refresh data">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-          <polyline points="23 4 23 10 17 10"></polyline>
-          <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
-        </svg>
-      </button>
+      <div id="header-top">
+        <span class="header-title">Upcoming Matches</span>
+        <button id="refresh-btn" title="Refresh data">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="23 4 23 10 17 10"></polyline>
+            <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
+          </svg>
+        </button>
+      </div>
+      <span id="last-updated"></span>
     </div>
     <div id="matches-container">
       <div id="loading">
         <div class="spinner"></div>
         <span>Loading matches…</span>
       </div>
-    </div>
-    <div id="footer">
-      <span id="last-updated"></span>
     </div>
   </div>
   <script src="config.js"></script>
