@@ -247,9 +247,17 @@ async function renderMatches(matches) {
   }
 }
 
-function setLastUpdated(timestamp) {
-  document.getElementById("last-updated").textContent =
-    `Updated ${new Date(timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
+function renderCrests() {
+  const container = document.getElementById("team-crests");
+  for (const team of TEAMS) {
+    const img = document.createElement("img");
+    img.className = "crest-logo";
+    img.src = `https://crests.football-data.org/${team.id}.svg`;
+    img.alt = team.name;
+    img.title = team.name;
+    img.onerror = () => img.remove();
+    container.appendChild(img);
+  }
 }
 
 function showError(msg) {
@@ -257,24 +265,18 @@ function showError(msg) {
 }
 
 // ── Init ─────────────────────────────────────────────────────────────────────
-async function load(forceRefresh = false) {
-  const btn = document.getElementById("refresh-btn");
-  btn.classList.add("spinning");
-
+async function load() {
   try {
-    let cache = forceRefresh ? null : await loadCache();
+    let cache = await loadCache();
     if (!cache) {
       const matches = await fetchAllMatches();
       cache = saveCache(matches);
     }
     await renderMatches(cache.matches);
-    setLastUpdated(cache.timestamp);
   } catch (err) {
     showError(`Failed to load: ${err.message}`);
-  } finally {
-    btn.classList.remove("spinning");
   }
 }
 
-document.getElementById("refresh-btn").addEventListener("click", () => load(true));
+renderCrests();
 document.addEventListener("DOMContentLoaded", () => load());
