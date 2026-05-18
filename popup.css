@@ -160,6 +160,10 @@ body {
   border-bottom: none;
 }
 
+.match-row--link {
+  cursor: pointer;
+}
+
 .match-row:hover {
   background: var(--bg-hover);
 }

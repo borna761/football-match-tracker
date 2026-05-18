@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Football Match Tracker",
-  "version": "1.0",
+  "version": "1.1",
   "description": "Upcoming matches for your favorite teams",
   "permissions": ["storage"],
   "icons": {
@@ -10,7 +10,10 @@
     "48": "icons/icon48.png",
     "128": "icons/icon128.png"
   },
-  "host_permissions": ["https://api.football-data.org/*"],
+  "host_permissions": [
+    "https://api.football-data.org/*",
+    "https://www.fotmob.com/*"
+  ],
   "action": {
     "default_popup": "popup.html",
     "default_icon": {
