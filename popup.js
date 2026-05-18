@@ -20,7 +20,6 @@ const EXCLUDED_STATUSES = new Set(["POSTPONED", "CANCELLED", "SUSPENDED"]);
 // ── API ──────────────────────────────────────────────────────────────────────
 async function fetchMatches(team) {
   const from = new Date();
-  from.setDate(from.getDate() - 1);
   const to = new Date();
   to.setDate(to.getDate() + LOOKAHEAD_DAYS);
   const url = `https://api.football-data.org/v4/teams/${team.id}/matches?dateFrom=${isoDate(from)}&dateTo=${isoDate(to)}`;
@@ -208,13 +207,11 @@ async function renderMatches(matches) {
   const isRefresh = container.children.length > 0 && !container.querySelector("#loading");
 
   const todayStr = isoDate(new Date());
-  const yesterdayStr = isoDate(new Date(Date.now() - 86400000));
 
   const visible = matches.filter((m) => {
     if (EXCLUDED_STATUSES.has(m.status)) return false;
     if (m.status === "FINISHED") {
-      const d = isoDate(new Date(m.utcDate));
-      if (d !== todayStr && d !== yesterdayStr) return false;
+      if (isoDate(new Date(m.utcDate)) !== todayStr) return false;
     }
     // show if at least one tracked+enabled team is involved
     const homeOn = TRACKED_IDS.has(m.homeTeam.id) && enabledTeamIds.has(m.homeTeam.id);
@@ -237,16 +234,15 @@ async function renderMatches(matches) {
   if (visible.length === 0) {
     const el = document.createElement("div");
     el.className = "no-matches";
-    el.textContent = "No matches yesterday or in the next 60 days.";
+    el.textContent = "No upcoming matches in the next 60 days.";
     fragment.appendChild(el);
     container.innerHTML = "";
     container.appendChild(fragment);
     return false;
   }
 
-  const yesterday = visible.filter((m) => isoDate(new Date(m.utcDate)) === yesterdayStr);
-  const today     = visible.filter((m) => isoDate(new Date(m.utcDate)) === todayStr);
-  const upcoming  = visible.filter((m) => isoDate(new Date(m.utcDate)) > todayStr);
+  const today    = visible.filter((m) => isoDate(new Date(m.utcDate)) === todayStr);
+  const upcoming = visible.filter((m) => isoDate(new Date(m.utcDate)) > todayStr);
 
   function appendSection(label, sectionMatches, { subgroups = false } = {}) {
     if (sectionMatches.length === 0) return null;
@@ -279,7 +275,6 @@ async function renderMatches(matches) {
     return anchor;
   }
 
-  appendSection("Yesterday", yesterday);
   const todayHeader    = appendSection("Today", today);
   const upcomingAnchor = appendSection(null, upcoming, { subgroups: true });
 
