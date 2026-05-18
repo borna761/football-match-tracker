@@ -1,14 +1,14 @@
 // API_KEY is loaded from config.js (see config.example.js)
 // Pure utility functions are loaded from utils.js
 
-// IDs from football-data.org — Inter Miami not available on free tier
+// IDs from football-data.org
 const TEAMS = [
   { id: 57,  name: "Arsenal" },
   { id: 81,  name: "Barcelona" },
   { id: 108, name: "Inter Milan" },
   { id: 762, name: "Argentina" },
   { id: 760, name: "Spain" },
-  { id: 763, name: "Sweden" },
+  { id: 792, name: "Sweden" },
 ];
 
 const CACHE_TTL_MS = 60 * 60 * 1000;
