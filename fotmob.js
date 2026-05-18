@@ -116,6 +116,7 @@ async function fetchFotmobUrls(dates) {
   return map;
 }
 
+// exported for testing
 function getFotmobData(match, fotmobMap) {
   const hN = normalizeTeam(match.homeTeam.name);
   const aN = normalizeTeam(match.awayTeam.name);
@@ -131,4 +132,8 @@ function getFotmobData(match, fotmobMap) {
   const home = match.homeTeam.shortName || match.homeTeam.name;
   const away = match.awayTeam.shortName || match.awayTeam.name;
   return { url: `https://www.fotmob.com/search?q=${encodeURIComponent(`${home} ${away}`)}`, live: null };
+}
+
+if (typeof module !== "undefined") {
+  module.exports = { normalizeTeam, getFotmobData };
 }
