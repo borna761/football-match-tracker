@@ -130,22 +130,10 @@ function renderMatch(match, fotmobData) {
     scoreEl.className = "match-score";
     scoreEl.textContent = `${ft.home ?? "?"} – ${ft.away ?? "?"}`;
     center.appendChild(scoreEl);
-  } else if (isHalfTime) {
-    // PAUSED = half-time; show HT badge + half-time score
-    const badge = document.createElement("div");
-    badge.className = "live-badge";
-    badge.textContent = "HT";
-    center.appendChild(badge);
-    const ht = score.halfTime;
-    if (ht && ht.home !== null) {
-      const scoreEl = document.createElement("div");
-      scoreEl.className = "match-score";
-      scoreEl.textContent = `${ht.home} – ${ht.away}`;
-      center.appendChild(scoreEl);
-    }
-  } else if (isLive) {
+  } else if (isHalfTime || isLive) {
     const liveData = fotmobData?.live;
     if (liveData && liveData.home !== null && liveData.away !== null) {
+      // FotMob says the match is in play — show live score + minute
       const scoreEl = document.createElement("div");
       scoreEl.className = "match-score live";
       scoreEl.textContent = `${liveData.home} – ${liveData.away}`;
@@ -154,7 +142,21 @@ function renderMatch(match, fotmobData) {
       minuteEl.className = "live-badge";
       minuteEl.textContent = liveData.minute ?? "LIVE";
       center.appendChild(minuteEl);
+    } else if (isHalfTime) {
+      // FotMob has no live data — show HT badge + half-time score
+      const badge = document.createElement("div");
+      badge.className = "live-badge";
+      badge.textContent = "HT";
+      center.appendChild(badge);
+      const ht = score.halfTime;
+      if (ht && ht.home !== null) {
+        const scoreEl = document.createElement("div");
+        scoreEl.className = "match-score";
+        scoreEl.textContent = `${ht.home} – ${ht.away}`;
+        center.appendChild(scoreEl);
+      }
     } else {
+      // IN_PLAY but no FotMob data
       const badge = document.createElement("div");
       badge.className = "live-badge";
       badge.textContent = "LIVE";
