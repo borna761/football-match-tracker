@@ -61,17 +61,21 @@ async function fetchAllMatches() {
 }
 
 // ── Cache ────────────────────────────────────────────────────────────────────
+const TEAMS_FINGERPRINT = TEAMS.map((t) => t.id).join(",");
+
 function loadCache() {
   return new Promise((resolve) => {
     chrome.storage.local.get("matchesCache", (data) => {
       const cache = data.matchesCache;
-      resolve(cache && Date.now() - cache.timestamp < CACHE_TTL_MS ? cache : null);
+      if (!cache) return resolve(null);
+      if (cache.fingerprint !== TEAMS_FINGERPRINT) return resolve(null); // teams changed
+      resolve(Date.now() - cache.timestamp < CACHE_TTL_MS ? cache : null);
     });
   });
 }
 
 function saveCache(matches) {
-  const cache = { matches, timestamp: Date.now() };
+  const cache = { matches, timestamp: Date.now(), fingerprint: TEAMS_FINGERPRINT };
   chrome.storage.local.set({ matchesCache: cache });
   return cache;
 }
