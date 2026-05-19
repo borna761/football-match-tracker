@@ -1,4 +1,4 @@
-const { isoDate, formatTime, formatDateLabel, dateKey } = require("../utils");
+const { isoDate, localIsoDate, formatTime, formatDateLabel, dateKey } = require("../utils");
 
 // All tests run with TZ=UTC (set via npm test script)
 
@@ -9,6 +9,29 @@ describe("isoDate", () => {
 
   test("uses the date portion only, ignoring time", () => {
     expect(isoDate(new Date("2026-12-31T23:59:59Z"))).toBe("2026-12-31");
+  });
+});
+
+// localIsoDate uses getFullYear/getMonth/getDate (local clock) rather than
+// toISOString (UTC). In TZ=UTC these are equivalent, but in other timezones
+// they diverge near midnight — a finished match from earlier in the day won't
+// disappear once UTC ticks past midnight.
+describe("localIsoDate", () => {
+  test("formats a Date as YYYY-MM-DD", () => {
+    expect(localIsoDate(new Date("2026-05-18T10:00:00Z"))).toBe("2026-05-18");
+  });
+
+  test("zero-pads month and day", () => {
+    expect(localIsoDate(new Date("2026-01-05T10:00:00Z"))).toBe("2026-01-05");
+  });
+
+  test("matches isoDate when timezone is UTC", () => {
+    const d = new Date("2026-05-18T15:00:00Z");
+    expect(localIsoDate(d)).toBe(isoDate(d));
+  });
+
+  test("handles end-of-year dates", () => {
+    expect(localIsoDate(new Date("2026-12-31T23:00:00Z"))).toBe("2026-12-31");
   });
 });
 
