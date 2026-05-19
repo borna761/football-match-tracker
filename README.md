@@ -13,6 +13,8 @@ A Chrome extension that shows upcoming matches for your favorite football teams,
 - Club and national team crests split by a divider in the header
 - Click any crest to temporarily hide that team's matches
 - Follows system dark/light mode
+- Badge on the toolbar icon shows today's match count
+- Tooltip shows today's fixtures or the next upcoming match
 - Caches results for 1 hour to stay within API rate limits
 
 ## Setup
