@@ -1,20 +1,132 @@
 // API_KEY is loaded from config.js (see config.example.js)
 // Pure utility functions are loaded from utils.js
 
-// Add or remove IDs to change which teams are tracked
-const TEAM_IDS = [57, 81, 108, 762, 760, 792];
+// Fallback used on first install before any teams are saved
+const DEFAULT_TEAM_IDS = [57, 81, 108, 762, 760, 792];
+
+// Mutable — loaded from storage, updated when user adds/removes teams
+let TEAM_IDS = [];
 
 const CACHE_TTL_MS = 60 * 60 * 1000;
 const TEAM_INFO_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+const COMP_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 const LOOKAHEAD_DAYS = 60;
 
-// Populated from API/cache before first render — treat as read-only after init
+// Populated from API/cache before first render — updated when teams change
 let TEAMS = [];
+
+// Free-tier competitions on football-data.org
+const COMPETITIONS = [
+  { code: "PL",  name: "Premier League" },
+  { code: "PD",  name: "La Liga" },
+  { code: "BL1", name: "Bundesliga" },
+  { code: "SA",  name: "Serie A" },
+  { code: "FL1", name: "Ligue 1" },
+  { code: "CL",  name: "Champions League" },
+  { code: "WC",  name: "World Cup" },
+  { code: "EC",  name: "European Championship" },
+  { code: "ELC", name: "Championship" },
+  { code: "DED", name: "Eredivisie" },
+  { code: "PPL", name: "Primeira Liga" },
+];
 
 // Statuses to exclude entirely from the list
 const EXCLUDED_STATUSES = new Set(["POSTPONED", "CANCELLED", "SUSPENDED"]);
 
-// ── API ──────────────────────────────────────────────────────────────────────
+// Fingerprint used to invalidate caches when the tracked team list changes
+function currentFingerprint() {
+  return TEAM_IDS.join(",");
+}
+
+// ── Tracked team IDs (persisted) ─────────────────────────────────────────────
+function loadTrackedIds() {
+  return new Promise((resolve) => {
+    chrome.storage.local.get("trackedTeamIds", (data) => {
+      TEAM_IDS = Array.isArray(data.trackedTeamIds) ? data.trackedTeamIds : [...DEFAULT_TEAM_IDS];
+      resolve();
+    });
+  });
+}
+
+function saveTrackedIds() {
+  chrome.storage.local.set({ trackedTeamIds: TEAM_IDS });
+}
+
+// ── Enabled teams (toggle state) ─────────────────────────────────────────────
+let TRACKED_IDS = new Set();
+let enabledTeamIds = new Set();
+
+function loadEnabledTeams() {
+  return new Promise((resolve) => {
+    chrome.storage.local.get("enabledTeams", (data) => {
+      if (Array.isArray(data.enabledTeams)) {
+        enabledTeamIds = new Set(data.enabledTeams.filter((id) => TRACKED_IDS.has(id)));
+      } else {
+        enabledTeamIds = new Set(TEAM_IDS);
+      }
+      resolve();
+    });
+  });
+}
+
+function saveEnabledTeams() {
+  chrome.storage.local.set({ enabledTeams: [...enabledTeamIds] });
+}
+
+// ── Match cache ───────────────────────────────────────────────────────────────
+function loadCache() {
+  return new Promise((resolve) => {
+    chrome.storage.local.get("matchesCache", (data) => {
+      const cache = data.matchesCache;
+      if (!cache) return resolve(null);
+      if (cache.fingerprint !== currentFingerprint()) return resolve(null);
+      resolve(Date.now() - cache.timestamp < CACHE_TTL_MS ? cache : null);
+    });
+  });
+}
+
+function saveCache(matches) {
+  const cache = { matches, timestamp: Date.now(), fingerprint: currentFingerprint() };
+  chrome.storage.local.set({ matchesCache: cache });
+  return cache;
+}
+
+// ── Team info cache ───────────────────────────────────────────────────────────
+function loadTeams() {
+  return new Promise((resolve) => {
+    chrome.storage.local.get("teamsCache", (data) => {
+      const cache = data.teamsCache;
+      if (!cache) return resolve(null);
+      if (cache.fingerprint !== currentFingerprint()) return resolve(null);
+      if (Date.now() - cache.timestamp > TEAM_INFO_TTL_MS) return resolve(null);
+      resolve(cache.teams);
+    });
+  });
+}
+
+function saveTeams(teams) {
+  chrome.storage.local.set({
+    teamsCache: { teams, timestamp: Date.now(), fingerprint: currentFingerprint() },
+  });
+}
+
+// ── Competition teams cache ───────────────────────────────────────────────────
+function loadCompCache(code) {
+  return new Promise((resolve) => {
+    chrome.storage.local.get(`compTeams_${code}`, (data) => {
+      const cache = data[`compTeams_${code}`];
+      if (!cache) return resolve(null);
+      if (Date.now() - cache.timestamp > COMP_CACHE_TTL_MS) return resolve(null);
+      resolve(cache.teams);
+    });
+  });
+}
+
+function saveCompCache(code, teams) {
+  chrome.storage.local.set({ [`compTeams_${code}`]: { teams, timestamp: Date.now() } });
+}
+
+// ── API ───────────────────────────────────────────────────────────────────────
 async function fetchMatches(team) {
   const from = new Date();
   const to = new Date();
@@ -56,46 +168,6 @@ async function fetchAllMatches() {
   return allMatches;
 }
 
-// ── Enabled teams ────────────────────────────────────────────────────────────
-const TRACKED_IDS = new Set(TEAM_IDS);
-let enabledTeamIds = new Set(TEAM_IDS); // all on by default
-
-function loadEnabledTeams() {
-  return new Promise((resolve) => {
-    chrome.storage.local.get("enabledTeams", (data) => {
-      if (Array.isArray(data.enabledTeams)) {
-        enabledTeamIds = new Set(data.enabledTeams.filter((id) => TRACKED_IDS.has(id)));
-      }
-      resolve();
-    });
-  });
-}
-
-function saveEnabledTeams() {
-  chrome.storage.local.set({ enabledTeams: [...enabledTeamIds] });
-}
-
-// ── Cache ────────────────────────────────────────────────────────────────────
-const TEAMS_FINGERPRINT = TEAM_IDS.join(",");
-
-function loadCache() {
-  return new Promise((resolve) => {
-    chrome.storage.local.get("matchesCache", (data) => {
-      const cache = data.matchesCache;
-      if (!cache) return resolve(null);
-      if (cache.fingerprint !== TEAMS_FINGERPRINT) return resolve(null); // teams changed
-      resolve(Date.now() - cache.timestamp < CACHE_TTL_MS ? cache : null);
-    });
-  });
-}
-
-function saveCache(matches) {
-  const cache = { matches, timestamp: Date.now(), fingerprint: TEAMS_FINGERPRINT };
-  chrome.storage.local.set({ matchesCache: cache });
-  return cache;
-}
-
-// ── Team info ────────────────────────────────────────────────────────────────
 async function fetchTeamInfo(id) {
   const res = await fetch(`https://api.football-data.org/v4/teams/${id}`, {
     headers: { "X-Auth-Token": API_KEY },
@@ -116,24 +188,6 @@ async function fetchTeamInfo(id) {
   };
 }
 
-function loadTeams() {
-  return new Promise((resolve) => {
-    chrome.storage.local.get("teamsCache", (data) => {
-      const cache = data.teamsCache;
-      if (!cache) return resolve(null);
-      if (cache.fingerprint !== TEAMS_FINGERPRINT) return resolve(null);
-      if (Date.now() - cache.timestamp > TEAM_INFO_TTL_MS) return resolve(null);
-      resolve(cache.teams);
-    });
-  });
-}
-
-function saveTeams(teams) {
-  chrome.storage.local.set({
-    teamsCache: { teams, timestamp: Date.now(), fingerprint: TEAMS_FINGERPRINT },
-  });
-}
-
 async function fetchAllTeams() {
   const results = [];
   for (const id of TEAM_IDS) {
@@ -141,14 +195,67 @@ async function fetchAllTeams() {
       results.push(await fetchTeamInfo(id));
     } catch (err) {
       console.error(`Team ${id}:`, err.message);
-      // Fallback: bare object so the rest of the UI still works
       results.push({ id, name: String(id), shortName: String(id), crest: null, national: false });
     }
   }
   return results;
 }
 
-// ── Rendering ────────────────────────────────────────────────────────────────
+async function fetchCompTeams(code) {
+  const res = await fetch(`https://api.football-data.org/v4/competitions/${code}/teams`, {
+    headers: { "X-Auth-Token": API_KEY },
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const json = await res.json();
+  return (json.teams || []).map((t) => ({
+    id:        t.id,
+    name:      t.name,
+    shortName: t.shortName,
+    crest:     t.crest,
+    national:  t.type === "NATIONAL",
+  }));
+}
+
+// ── Team management ───────────────────────────────────────────────────────────
+async function addTeam(id, knownInfo = null) {
+  if (TEAM_IDS.includes(id)) return;
+
+  let info = knownInfo ?? null;
+  if (!info) {
+    try {
+      info = await fetchTeamInfo(id);
+    } catch {
+      info = { id, name: String(id), shortName: String(id), crest: null, national: false };
+    }
+  }
+
+  TEAM_IDS.push(id);
+  TRACKED_IDS.add(id);
+  enabledTeamIds.add(id);
+  TEAMS.push(info);
+
+  saveTrackedIds();
+  saveEnabledTeams();
+  saveTeams(TEAMS);
+  chrome.storage.local.remove("matchesCache");
+  renderCrests();
+}
+
+function removeTeam(id) {
+  TEAM_IDS = TEAM_IDS.filter((x) => x !== id);
+  TRACKED_IDS.delete(id);
+  enabledTeamIds.delete(id);
+  const idx = TEAMS.findIndex((t) => t.id === id);
+  if (idx !== -1) TEAMS.splice(idx, 1);
+
+  saveTrackedIds();
+  saveEnabledTeams();
+  saveTeams(TEAMS);
+  chrome.storage.local.remove("matchesCache");
+  renderCrests();
+}
+
+// ── Rendering — match list ────────────────────────────────────────────────────
 function logoEl(team) {
   if (!team.crest) {
     const div = document.createElement("div");
@@ -196,7 +303,6 @@ function renderMatch(match, fotmobData) {
   center.className = "match-time";
 
   if (isFinished) {
-    // fullTime is always populated on FINISHED matches
     const ft = score.fullTime;
     const scoreEl = document.createElement("div");
     scoreEl.className = "match-score";
@@ -205,7 +311,6 @@ function renderMatch(match, fotmobData) {
   } else if (isHalfTime || isLive) {
     const liveData = fotmobData?.live;
     if (liveData && liveData.home !== null && liveData.away !== null) {
-      // FotMob says the match is in play — show live score + minute
       const scoreEl = document.createElement("div");
       scoreEl.className = "match-score live";
       scoreEl.textContent = `${liveData.home} – ${liveData.away}`;
@@ -215,7 +320,6 @@ function renderMatch(match, fotmobData) {
       minuteEl.textContent = liveData.minute ?? "LIVE";
       center.appendChild(minuteEl);
     } else if (isHalfTime) {
-      // FotMob has no live data — show HT badge + half-time score
       const badge = document.createElement("div");
       badge.className = "live-badge";
       badge.textContent = "HT";
@@ -228,7 +332,6 @@ function renderMatch(match, fotmobData) {
         center.appendChild(scoreEl);
       }
     } else {
-      // IN_PLAY but no FotMob data
       const badge = document.createElement("div");
       badge.className = "live-badge";
       badge.textContent = "LIVE";
@@ -280,12 +383,10 @@ async function renderMatches(matches) {
   chrome.action.setBadgeText({ text: todayCount > 0 ? String(todayCount) : "" });
   chrome.action.setBadgeBackgroundColor({ color: "#f97316" });
 
-  // Do all async work before touching the DOM
   const fotmobMap = visible.length > 0
     ? await fetchFotmobUrls([...new Set(visible.map((m) => isoDate(new Date(m.utcDate))))])
     : {};
 
-  // Build new content off-screen in a fragment
   const fragment = document.createDocumentFragment();
 
   if (visible.length === 0) {
@@ -335,11 +436,9 @@ async function renderMatches(matches) {
   const todayHeader    = appendSection("Today", today);
   const upcomingAnchor = appendSection(null, upcoming, { subgroups: true });
 
-  // Atomic swap — no flash
   container.innerHTML = "";
   container.appendChild(fragment);
 
-  // Only scroll on first render, not on live refreshes
   if (!isRefresh) {
     const scrollTarget = todayHeader ?? upcomingAnchor;
     if (scrollTarget) {
@@ -352,6 +451,7 @@ async function renderMatches(matches) {
 
 function renderCrests() {
   const container = document.getElementById("team-crests");
+  container.innerHTML = "";
   const sorted = [
     ...TEAMS.filter((t) => !t.national).sort((a, b) => a.name.localeCompare(b.name)),
     ...TEAMS.filter((t) =>  t.national).sort((a, b) => a.name.localeCompare(b.name)),
@@ -379,7 +479,7 @@ function renderCrests() {
       }
       img.classList.toggle("crest-off", !enabledTeamIds.has(team.id));
       saveEnabledTeams();
-      if (_lastMatches) renderMatches(_lastMatches);
+      if (_lastMatches && !_settingsOpen) renderMatches(_lastMatches);
     });
     container.appendChild(img);
   }
@@ -389,11 +489,226 @@ function showError(msg) {
   document.getElementById("matches-container").innerHTML = `<div id="error">${msg}</div>`;
 }
 
-// ── Init ─────────────────────────────────────────────────────────────────────
+// ── Settings panel ────────────────────────────────────────────────────────────
+let _settingsOpen = false;
+let _teamAddedInSettings = false;
+let _compTeams = [];
+
+function openSettings() {
+  _settingsOpen = true;
+  _teamAddedInSettings = false;
+  document.getElementById("matches-container").hidden = true;
+  document.getElementById("settings-panel").hidden = false;
+  document.getElementById("settings-btn").classList.add("active");
+  renderSettingsPanel();
+}
+
+function closeSettings() {
+  _settingsOpen = false;
+  document.getElementById("settings-panel").hidden = true;
+  document.getElementById("matches-container").hidden = false;
+  document.getElementById("settings-btn").classList.remove("active");
+
+  if (_teamAddedInSettings) {
+    load(); // full reload to fetch matches for new teams
+  } else if (_lastMatches) {
+    renderMatches(_lastMatches); // re-filter with any removals
+  }
+}
+
+function renderSettingsPanel() {
+  const panel = document.getElementById("settings-panel");
+  panel.innerHTML = "";
+
+  // ── Tracked teams ──
+  const trackedSection = document.createElement("div");
+  trackedSection.className = "settings-section";
+
+  const trackedLabel = document.createElement("div");
+  trackedLabel.className = "settings-label";
+  trackedLabel.textContent = "Tracked teams";
+  trackedSection.appendChild(trackedLabel);
+
+  const chips = document.createElement("div");
+  chips.className = "tracked-chips";
+
+  if (TEAMS.length === 0) {
+    const empty = document.createElement("span");
+    empty.className = "settings-empty";
+    empty.textContent = "No teams tracked yet";
+    chips.appendChild(empty);
+  } else {
+    const sorted = [...TEAMS].sort((a, b) => a.name.localeCompare(b.name));
+    for (const team of sorted) {
+      chips.appendChild(makeChip(team));
+    }
+  }
+
+  trackedSection.appendChild(chips);
+  panel.appendChild(trackedSection);
+
+  // ── Add teams ──
+  const addSection = document.createElement("div");
+  addSection.className = "settings-section";
+
+  const addLabel = document.createElement("div");
+  addLabel.className = "settings-label";
+  addLabel.textContent = "Add teams";
+  addSection.appendChild(addLabel);
+
+  const controls = document.createElement("div");
+  controls.className = "settings-controls";
+
+  const compSelect = document.createElement("select");
+  compSelect.className = "settings-select";
+
+  const placeholder = document.createElement("option");
+  placeholder.value = "";
+  placeholder.textContent = "Pick a competition…";
+  compSelect.appendChild(placeholder);
+  for (const comp of COMPETITIONS) {
+    const opt = document.createElement("option");
+    opt.value = comp.code;
+    opt.textContent = comp.name;
+    compSelect.appendChild(opt);
+  }
+
+  const searchInput = document.createElement("input");
+  searchInput.type = "text";
+  searchInput.className = "settings-search";
+  searchInput.placeholder = "Search teams…";
+  searchInput.disabled = true;
+
+  const teamsList = document.createElement("div");
+  teamsList.className = "comp-teams-list";
+
+  compSelect.addEventListener("change", async () => {
+    const code = compSelect.value;
+    if (!code) {
+      searchInput.disabled = true;
+      searchInput.value = "";
+      _compTeams = [];
+      teamsList.innerHTML = "";
+      return;
+    }
+    searchInput.disabled = false;
+    teamsList.innerHTML = `<div class="settings-status">Loading…</div>`;
+
+    let teams = await loadCompCache(code);
+    if (!teams) {
+      try {
+        teams = await fetchCompTeams(code);
+        saveCompCache(code, teams);
+      } catch (err) {
+        teamsList.innerHTML = `<div class="settings-status">Failed to load: ${err.message}</div>`;
+        return;
+      }
+    }
+    _compTeams = teams;
+    renderCompTeamRows(teamsList, filterCompTeams(searchInput.value));
+  });
+
+  searchInput.addEventListener("input", () => {
+    renderCompTeamRows(teamsList, filterCompTeams(searchInput.value));
+  });
+
+  controls.appendChild(compSelect);
+  controls.appendChild(searchInput);
+  addSection.appendChild(controls);
+  addSection.appendChild(teamsList);
+  panel.appendChild(addSection);
+}
+
+function makeChip(team) {
+  const chip = document.createElement("div");
+  chip.className = "team-chip";
+
+  const crest = document.createElement("img");
+  crest.className = "team-chip-crest";
+  crest.src = `https://crests.football-data.org/${team.id}.svg`;
+  crest.alt = "";
+  crest.onerror = () => crest.remove();
+  chip.appendChild(crest);
+
+  const name = document.createElement("span");
+  name.textContent = team.shortName || team.name;
+  chip.appendChild(name);
+
+  const btn = document.createElement("button");
+  btn.className = "team-chip-remove";
+  btn.textContent = "×";
+  btn.title = `Remove ${team.name}`;
+  btn.addEventListener("click", () => {
+    removeTeam(team.id);
+    renderSettingsPanel();
+  });
+  chip.appendChild(btn);
+
+  return chip;
+}
+
+function filterCompTeams(query) {
+  const q = query.trim().toLowerCase();
+  if (!q) return _compTeams;
+  return _compTeams.filter(
+    (t) => t.name.toLowerCase().includes(q) || (t.shortName || "").toLowerCase().includes(q)
+  );
+}
+
+function renderCompTeamRows(container, teams) {
+  container.innerHTML = "";
+  if (teams.length === 0) {
+    container.innerHTML = `<div class="settings-status">No teams found.</div>`;
+    return;
+  }
+  const sorted = [...teams].sort((a, b) => a.name.localeCompare(b.name));
+  for (const team of sorted) {
+    const isTracked = TEAM_IDS.includes(team.id);
+    const row = document.createElement("div");
+    row.className = "comp-team-row";
+
+    const crest = document.createElement("img");
+    crest.className = "comp-team-crest";
+    crest.src = team.crest || `https://crests.football-data.org/${team.id}.svg`;
+    crest.alt = "";
+    crest.onerror = () => { crest.style.visibility = "hidden"; };
+    row.appendChild(crest);
+
+    const nameEl = document.createElement("span");
+    nameEl.className = "comp-team-name";
+    nameEl.textContent = team.shortName || team.name;
+    row.appendChild(nameEl);
+
+    const btn = document.createElement("button");
+    btn.className = `comp-team-btn${isTracked ? " tracked" : ""}`;
+    btn.textContent = isTracked ? "Added" : "Add";
+    if (isTracked) btn.disabled = true;
+
+    btn.addEventListener("click", async () => {
+      btn.disabled = true;
+      btn.textContent = "Adding…";
+      await addTeam(team.id, team);
+      _teamAddedInSettings = true;
+      btn.className = "comp-team-btn tracked";
+      btn.textContent = "Added";
+      // Refresh the chips section
+      const chipsEl = document.querySelector(".tracked-chips");
+      if (chipsEl) {
+        chipsEl.innerHTML = "";
+        const sorted2 = [...TEAMS].sort((a, b) => a.name.localeCompare(b.name));
+        for (const t of sorted2) chipsEl.appendChild(makeChip(t));
+      }
+    });
+
+    row.appendChild(btn);
+    container.appendChild(row);
+  }
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────────
 let _liveTimer = null;
 let _lastMatches = null;
 
-// Re-render every 30s using cached match data (only re-fetches FotMob live scores)
 async function scheduleLiveRefresh(cachedMatches) {
   clearTimeout(_liveTimer);
   _liveTimer = setTimeout(async () => {
@@ -422,22 +737,28 @@ async function load() {
 
 if (typeof document !== "undefined") {
   document.addEventListener("DOMContentLoaded", async () => {
+    await loadTrackedIds();
+    TRACKED_IDS = new Set(TEAM_IDS);
     await loadEnabledTeams();
 
-    // Seed TEAMS with minimal stubs so fetchAllMatches can start immediately
+    // Wire up settings toggle
+    document.getElementById("settings-btn").addEventListener("click", () => {
+      if (_settingsOpen) closeSettings();
+      else openSettings();
+    });
+
+    // Seed TEAMS with stubs so match fetching can start immediately
     TEAMS.push(...TEAM_IDS.map((id) => ({ id, name: String(id), shortName: String(id), crest: null, national: false })));
 
-    // Load matches right away — don't block on team metadata
+    // Start match loading without blocking on team metadata
     const matchLoadPromise = load();
 
-    // Fetch team metadata (cached 7 days) in parallel
+    // Load team metadata in parallel
     let freshTeams = await loadTeams();
     if (!freshTeams) {
       freshTeams = await fetchAllTeams();
       saveTeams(freshTeams);
     }
-
-    // Swap stubs for real data and render crests
     TEAMS.length = 0;
     TEAMS.push(...freshTeams);
     renderCrests();
