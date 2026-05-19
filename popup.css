@@ -484,17 +484,17 @@ body {
 }
 
 .bmc-btn {
-  background: none;
-  border: 1px solid var(--border);
+  background: #FFDD00;
+  border: none;
   border-radius: 999px;
-  color: var(--text-muted);
+  color: #000000;
   cursor: pointer;
   font-size: 12px;
-  padding: 5px 14px;
-  transition: border-color 0.15s, color 0.15s;
+  font-weight: 600;
+  padding: 6px 14px;
+  transition: background 0.15s;
 }
 
 .bmc-btn:hover {
-  border-color: var(--text-muted);
-  color: var(--text);
+  background: #ffcf00;
 }
