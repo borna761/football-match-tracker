@@ -40,10 +40,13 @@ const EXCLUDED_STATUSES = new Set(["POSTPONED", "CANCELLED", "SUSPENDED"]);
 // Bump TEAMS_VERSION to force a one-time re-fetch of team metadata.
 // matchesFingerprint intentionally has no version prefix so existing
 // match caches remain valid when only team metadata needs refreshing.
-const TEAMS_VERSION   = "t3";
-const MATCHES_VERSION = "m1";
-function teamsFingerprint()   { return `${TEAMS_VERSION}:${TEAM_IDS.join(",")}`; }
-function matchesFingerprint() { return `${MATCHES_VERSION}:${TEAM_IDS.join(",")}`; }
+// Read the extension version from the manifest so that bumping the manifest
+// version automatically busts all caches — no manual version strings needed.
+const APP_VERSION = (typeof chrome !== "undefined" && chrome.runtime)
+  ? chrome.runtime.getManifest().version
+  : "0";
+function teamsFingerprint()   { return `t:${APP_VERSION}:${TEAM_IDS.join(",")}`; }
+function matchesFingerprint() { return `m:${APP_VERSION}:${TEAM_IDS.join(",")}`; }
 
 // ── Tracked team IDs (persisted) ─────────────────────────────────────────────
 function loadTrackedIds() {
