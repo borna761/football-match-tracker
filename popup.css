@@ -17,7 +17,6 @@
   --text-dimmer: #334155;
   --placeholder: #1e293b;
   --spinner-track: rgba(255, 255, 255, 0.1);
-  --btn-hover-bg: rgba(255, 255, 255, 0.08);
 }
 
 @media (prefers-color-scheme: light) {
@@ -33,7 +32,6 @@
     --text-dimmer: #94a3b8;
     --placeholder: #e2e8f0;
     --spinner-track: rgba(0, 0, 0, 0.08);
-    --btn-hover-bg: rgba(0, 0, 0, 0.06);
   }
 }
 
@@ -53,52 +51,43 @@ body {
 /* ── Header ── */
 #header {
   display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 12px 16px 10px;
+  align-items: center;
+  padding: 9px 14px;
   border-bottom: 1px solid var(--border);
 }
 
-#header-top {
+#team-crests {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 8px;
 }
 
-.header-title {
-  font-size: 13px;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--text-muted);
-}
-
-#refresh-btn {
-  background: none;
-  border: none;
+.crest-logo {
+  width: 22px;
+  height: 22px;
+  object-fit: contain;
   cursor: pointer;
-  color: var(--text-dim);
-  display: flex;
-  align-items: center;
-  padding: 4px;
-  border-radius: 4px;
-  transition: color 0.15s, background 0.15s;
+  transition: opacity 0.15s, filter 0.15s;
 }
 
-#refresh-btn:hover {
-  color: var(--text);
-  background: var(--btn-hover-bg);
+.crest-logo.crest-off {
+  filter: grayscale(1);
+  opacity: 0.3;
 }
 
-#refresh-btn.spinning svg {
-  animation: spin 0.7s linear infinite;
+.crest-divider {
+  width: 1px;
+  height: 16px;
+  background: var(--border);
+  margin: 0 2px;
+  flex-shrink: 0;
 }
 
+/* ── Loading ── */
 @keyframes spin {
   to { transform: rotate(360deg); }
 }
 
-/* ── Loading ── */
 #loading {
   display: flex;
   flex-direction: column;
@@ -130,6 +119,27 @@ body {
   color: #38bdf8;
   cursor: pointer;
   text-decoration: underline;
+}
+
+/* ── Matches container ── */
+#matches-container {
+  max-height: 480px;
+  overflow-y: auto;
+}
+
+/* ── Section headers ── */
+.section-header {
+  padding: 10px 16px 4px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  border-top: 1px solid var(--border);
+}
+
+.section-header:first-child {
+  border-top: none;
 }
 
 /* ── Date group ── */
@@ -251,11 +261,6 @@ body {
   letter-spacing: 0.05em;
   text-align: center;
   white-space: nowrap;
-}
-
-#last-updated {
-  font-size: 10px;
-  color: var(--text-dimmer);
 }
 
 /* ── No matches ── */
