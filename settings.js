@@ -33,7 +33,8 @@ function closeSettings() {
   document.getElementById("settings-btn").classList.remove("active");
 
   if (_teamAddedInSettings) {
-    load(); // full reload to fetch matches for new teams
+    showLoading("Fetching matches…");
+    load();
   } else if (_lastMatches) {
     renderMatches(_lastMatches); // re-filter with any removals
   }

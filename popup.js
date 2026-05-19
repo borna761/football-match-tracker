@@ -282,6 +282,11 @@ function setLoadingText(msg) {
   if (span) span.textContent = msg;
 }
 
+function showLoading(msg = "Loading matches…") {
+  const container = document.getElementById("matches-container");
+  container.innerHTML = `<div id="loading"><div class="spinner"></div><span>${msg}</span></div>`;
+}
+
 function showError(msg) {
   const container = document.getElementById("matches-container");
   container.innerHTML = "";
