@@ -33,9 +33,12 @@ const COMPETITIONS = [
 // Statuses to exclude entirely from the list
 const EXCLUDED_STATUSES = new Set(["POSTPONED", "CANCELLED", "SUSPENDED"]);
 
-// Fingerprint used to invalidate caches when the tracked team list changes
+// Fingerprint used to invalidate caches when the tracked team list changes.
+// Bump CACHE_VERSION any time the stored data format changes so old entries
+// are automatically discarded and re-fetched.
+const CACHE_VERSION = "2";
 function currentFingerprint() {
-  return TEAM_IDS.join(",");
+  return `${CACHE_VERSION}:${TEAM_IDS.join(",")}`;
 }
 
 // ── Tracked team IDs (persisted) ─────────────────────────────────────────────
