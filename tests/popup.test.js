@@ -3,6 +3,8 @@ const utils = require("../utils");
 Object.assign(global, utils);
 const { filterMatches } = require("../popup");
 
+// filterMatches expects a local-date string (YYYY-MM-DD) from localIsoDate().
+// TZ=UTC makes local === UTC so these tests are timezone-agnostic.
 const TODAY = "2026-05-18";
 
 // ── helpers ──────────────────────────────────────────────────────────────────
