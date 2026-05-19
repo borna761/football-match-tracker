@@ -99,6 +99,11 @@ function loadTeams() {
       if (!cache) return resolve(null);
       if (cache.fingerprint !== currentFingerprint()) return resolve(null);
       if (Date.now() - cache.timestamp > TEAM_INFO_TTL_MS) return resolve(null);
+      // Reject cache if any entry is a fallback stub (missing real API data).
+      // This can happen when an initial fetch fails mid-way due to rate limits.
+      const valid = Array.isArray(cache.teams) &&
+        cache.teams.every((t) => t.name && t.name !== String(t.id) && ("national" in t));
+      if (!valid) return resolve(null);
       resolve(cache.teams);
     });
   });
@@ -131,7 +136,9 @@ async function fetchMatches(team) {
   const from = new Date();
   const to = new Date();
   to.setDate(to.getDate() + LOOKAHEAD_DAYS);
-  const url = `https://api.football-data.org/v4/teams/${team.id}/matches?dateFrom=${isoDate(from)}&dateTo=${isoDate(to)}`;
+  // Use local date for dateFrom so matches from today aren't missed when
+  // the local clock is still on "today" but UTC has already rolled over.
+  const url = `https://api.football-data.org/v4/teams/${team.id}/matches?dateFrom=${localIsoDate(from)}&dateTo=${isoDate(to)}`;
   const res = await fetch(url, {
     headers: { "X-Auth-Token": API_KEY },
   });
