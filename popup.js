@@ -176,6 +176,9 @@ async function fetchAllMatches() {
   return allMatches;
 }
 
+// Competition codes that indicate a national (not club) team
+const NATIONAL_COMP_CODES = new Set(["WC", "EC"]);
+
 async function fetchTeamInfo(id) {
   const res = await fetch(`https://api.football-data.org/v4/teams/${id}`, {
     headers: { "X-Auth-Token": API_KEY },
@@ -187,12 +190,15 @@ async function fetchTeamInfo(id) {
   if (remaining <= 1 && resetSecs > 0) {
     await new Promise((r) => setTimeout(r, resetSecs * 1000 + 200));
   }
+  // The API has no top-level "type" field on teams — derive national status
+  // from runningCompetitions instead (WC/EC = national team, everything else = club).
+  const national = (json.runningCompetitions || []).some((c) => NATIONAL_COMP_CODES.has(c.code));
   return {
     id,
     name:      json.name,
     shortName: json.shortName,
     crest:     json.crest,
-    national:  json.type === "NATIONAL",
+    national,
   };
 }
 
@@ -215,12 +221,15 @@ async function fetchCompTeams(code) {
   });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const json = await res.json();
+  // Derive national status from the competition code rather than t.type,
+  // because the API does not reliably set a top-level type field on team objects.
+  const isNational = NATIONAL_COMP_CODES.has(code);
   return (json.teams || []).map((t) => ({
     id:        t.id,
     name:      t.name,
     shortName: t.shortName,
     crest:     t.crest,
-    national:  t.type === "NATIONAL",
+    national:  isNational,
   }));
 }
 
