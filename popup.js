@@ -757,22 +757,16 @@ if (typeof document !== "undefined") {
       else openSettings();
     });
 
-    // Seed TEAMS with stubs so match fetching can start immediately
-    TEAMS.push(...TEAM_IDS.map((id) => ({ id, name: String(id), shortName: String(id), crest: null, national: false })));
-
-    // Start match loading without blocking on team metadata
-    const matchLoadPromise = load();
-
-    // Load team metadata in parallel
+    // Load team metadata first, then matches — sequential so both don't
+    // compete for the 10 req/min rate limit on a cold cache.
     let freshTeams = await loadTeams();
     if (!freshTeams) {
       freshTeams = await fetchAllTeams();
       saveTeams(freshTeams);
     }
-    TEAMS.length = 0;
     TEAMS.push(...freshTeams);
     renderCrests();
 
-    await matchLoadPromise;
+    await load();
   });
 }
