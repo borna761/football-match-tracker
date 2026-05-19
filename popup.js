@@ -37,10 +37,12 @@ const EXCLUDED_STATUSES = new Set(["POSTPONED", "CANCELLED", "SUSPENDED"]);
 // Bump TEAMS_VERSION when the team-info data format changes (forces re-fetch
 // of name/crest/national without also invalidating the match cache).
 // Bump MATCHES_VERSION when the match data format or query changes.
-const TEAMS_VERSION  = "t2";
-const MATCHES_VERSION = "m1";
+// Bump TEAMS_VERSION to force a one-time re-fetch of team metadata.
+// matchesFingerprint intentionally has no version prefix so existing
+// match caches remain valid when only team metadata needs refreshing.
+const TEAMS_VERSION = "t2";
 function teamsFingerprint()   { return `${TEAMS_VERSION}:${TEAM_IDS.join(",")}`; }
-function matchesFingerprint() { return `${MATCHES_VERSION}:${TEAM_IDS.join(",")}`; }
+function matchesFingerprint() { return TEAM_IDS.join(","); }
 
 // ── Tracked team IDs (persisted) ─────────────────────────────────────────────
 function loadTrackedIds() {
