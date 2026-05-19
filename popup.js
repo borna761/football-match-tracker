@@ -33,13 +33,14 @@ const COMPETITIONS = [
 // Statuses to exclude entirely from the list
 const EXCLUDED_STATUSES = new Set(["POSTPONED", "CANCELLED", "SUSPENDED"]);
 
-// Fingerprint used to invalidate caches when the tracked team list changes.
-// Bump CACHE_VERSION any time the stored data format changes so old entries
-// are automatically discarded and re-fetched.
-const CACHE_VERSION = "2";
-function currentFingerprint() {
-  return `${CACHE_VERSION}:${TEAM_IDS.join(",")}`;
-}
+// Separate fingerprints let us bust one cache independently of the other.
+// Bump TEAMS_VERSION when the team-info data format changes (forces re-fetch
+// of name/crest/national without also invalidating the match cache).
+// Bump MATCHES_VERSION when the match data format or query changes.
+const TEAMS_VERSION  = "t2";
+const MATCHES_VERSION = "m1";
+function teamsFingerprint()   { return `${TEAMS_VERSION}:${TEAM_IDS.join(",")}`; }
+function matchesFingerprint() { return `${MATCHES_VERSION}:${TEAM_IDS.join(",")}`; }
 
 // ── Tracked team IDs (persisted) ─────────────────────────────────────────────
 function loadTrackedIds() {
@@ -82,14 +83,14 @@ function loadCache() {
     chrome.storage.local.get("matchesCache", (data) => {
       const cache = data.matchesCache;
       if (!cache) return resolve(null);
-      if (cache.fingerprint !== currentFingerprint()) return resolve(null);
+      if (cache.fingerprint !== matchesFingerprint()) return resolve(null);
       resolve(Date.now() - cache.timestamp < CACHE_TTL_MS ? cache : null);
     });
   });
 }
 
 function saveCache(matches) {
-  const cache = { matches, timestamp: Date.now(), fingerprint: currentFingerprint() };
+  const cache = { matches, timestamp: Date.now(), fingerprint: matchesFingerprint() };
   chrome.storage.local.set({ matchesCache: cache });
   return cache;
 }
@@ -100,13 +101,8 @@ function loadTeams() {
     chrome.storage.local.get("teamsCache", (data) => {
       const cache = data.teamsCache;
       if (!cache) return resolve(null);
-      if (cache.fingerprint !== currentFingerprint()) return resolve(null);
+      if (cache.fingerprint !== teamsFingerprint()) return resolve(null);
       if (Date.now() - cache.timestamp > TEAM_INFO_TTL_MS) return resolve(null);
-      // Reject cache if any entry is a fallback stub (missing real API data).
-      // This can happen when an initial fetch fails mid-way due to rate limits.
-      const valid = Array.isArray(cache.teams) &&
-        cache.teams.every((t) => t.name && t.name !== String(t.id) && ("national" in t));
-      if (!valid) return resolve(null);
       resolve(cache.teams);
     });
   });
@@ -114,7 +110,7 @@ function loadTeams() {
 
 function saveTeams(teams) {
   chrome.storage.local.set({
-    teamsCache: { teams, timestamp: Date.now(), fingerprint: currentFingerprint() },
+    teamsCache: { teams, timestamp: Date.now(), fingerprint: teamsFingerprint() },
   });
 }
 
