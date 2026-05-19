@@ -1,9 +1,6 @@
 // API_KEY is loaded from config.js (see config.example.js)
 // Pure utility functions are loaded from utils.js
 
-// No default teams — users pick their own via the settings panel
-const DEFAULT_TEAM_IDS = [];
-
 // Mutable — loaded from storage, updated when user adds/removes teams
 let TEAM_IDS = [];
 
@@ -33,15 +30,8 @@ const COMPETITIONS = [
 // Statuses to exclude entirely from the list
 const EXCLUDED_STATUSES = new Set(["POSTPONED", "CANCELLED", "SUSPENDED"]);
 
-// Separate fingerprints let us bust one cache independently of the other.
-// Bump TEAMS_VERSION when the team-info data format changes (forces re-fetch
-// of name/crest/national without also invalidating the match cache).
-// Bump MATCHES_VERSION when the match data format or query changes.
-// Bump TEAMS_VERSION to force a one-time re-fetch of team metadata.
-// matchesFingerprint intentionally has no version prefix so existing
-// match caches remain valid when only team metadata needs refreshing.
-// Read the extension version from the manifest so that bumping the manifest
-// version automatically busts all caches — no manual version strings needed.
+// Cache fingerprints include the manifest version so bumping the version in
+// manifest.json automatically invalidates all stored caches.
 const APP_VERSION = (typeof chrome !== "undefined" && chrome.runtime)
   ? chrome.runtime.getManifest().version
   : "0";
@@ -52,7 +42,7 @@ function matchesFingerprint() { return `m:${APP_VERSION}:${TEAM_IDS.join(",")}`;
 function loadTrackedIds() {
   return new Promise((resolve) => {
     chrome.storage.local.get("trackedTeamIds", (data) => {
-      TEAM_IDS = Array.isArray(data.trackedTeamIds) ? data.trackedTeamIds : [...DEFAULT_TEAM_IDS];
+      TEAM_IDS = Array.isArray(data.trackedTeamIds) ? data.trackedTeamIds : [];
       resolve();
     });
   });
