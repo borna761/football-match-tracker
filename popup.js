@@ -257,7 +257,7 @@ function filterMatches(matches, todayStr, trackedIds, enabledIds) {
   return matches.filter((m) => {
     if (EXCLUDED_STATUSES.has(m.status)) return false;
     if (m.status === "FINISHED") {
-      if (isoDate(new Date(m.utcDate)) !== todayStr) return false;
+      if (localIsoDate(new Date(m.utcDate)) !== todayStr) return false;
     }
     const homeOn = trackedIds.has(m.homeTeam.id) && enabledIds.has(m.homeTeam.id);
     const awayOn = trackedIds.has(m.awayTeam.id) && enabledIds.has(m.awayTeam.id);
@@ -273,10 +273,10 @@ async function renderMatches(matches) {
   const container = document.getElementById("matches-container");
   const isRefresh = container.children.length > 0 && !container.querySelector("#loading");
 
-  const todayStr = isoDate(new Date());
+  const todayStr = localIsoDate(new Date());
   const visible = filterMatches(matches, todayStr, TRACKED_IDS, enabledTeamIds);
 
-  const todayCount = visible.filter((m) => isoDate(new Date(m.utcDate)) === todayStr).length;
+  const todayCount = visible.filter((m) => localIsoDate(new Date(m.utcDate)) === todayStr).length;
   chrome.action.setBadgeText({ text: todayCount > 0 ? String(todayCount) : "" });
   chrome.action.setBadgeBackgroundColor({ color: "#f97316" });
 
@@ -298,8 +298,8 @@ async function renderMatches(matches) {
     return false;
   }
 
-  const today    = visible.filter((m) => isoDate(new Date(m.utcDate)) === todayStr);
-  const upcoming = visible.filter((m) => isoDate(new Date(m.utcDate)) > todayStr);
+  const today    = visible.filter((m) => localIsoDate(new Date(m.utcDate)) === todayStr);
+  const upcoming = visible.filter((m) => localIsoDate(new Date(m.utcDate)) > todayStr);
 
   function appendSection(label, sectionMatches, { subgroups = false } = {}) {
     if (sectionMatches.length === 0) return null;
