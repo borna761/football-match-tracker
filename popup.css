@@ -476,3 +476,25 @@ body {
   color: var(--text-dim);
   font-size: 12px;
 }
+
+/* ── Support ── */
+.settings-section--support {
+  display: flex;
+  justify-content: center;
+}
+
+.bmc-btn {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 5px 14px;
+  transition: border-color 0.15s, color 0.15s;
+}
+
+.bmc-btn:hover {
+  border-color: var(--text-muted);
+  color: var(--text);
+}

@@ -44,6 +44,22 @@ function renderSettingsPanel() {
   panel.innerHTML = "";
   panel.appendChild(buildTrackedSection());
   panel.appendChild(buildAddSection());
+  panel.appendChild(buildSupportSection());
+}
+
+function buildSupportSection() {
+  const section = document.createElement("div");
+  section.className = "settings-section settings-section--support";
+
+  const btn = document.createElement("button");
+  btn.className = "bmc-btn";
+  btn.textContent = "☕ Buy me a coffee";
+  btn.addEventListener("click", () => {
+    chrome.tabs.create({ url: "https://buymeacoffee.com/borna761" });
+  });
+
+  section.appendChild(btn);
+  return section;
 }
 
 function buildTrackedSection() {
