@@ -278,7 +278,12 @@ function renderCrests() {
 }
 
 function showError(msg) {
-  document.getElementById("matches-container").innerHTML = `<div id="error">${msg}</div>`;
+  const container = document.getElementById("matches-container");
+  container.innerHTML = "";
+  const el = document.createElement("div");
+  el.id = "error";
+  el.textContent = msg;
+  container.appendChild(el);
 }
 
 // ── Init ──────────────────────────────────────────────────────────────────────

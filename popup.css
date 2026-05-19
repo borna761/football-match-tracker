@@ -476,3 +476,30 @@ body {
   color: var(--text-dim);
   font-size: 12px;
 }
+
+/* ── Support ── */
+.settings-section--support {
+  display: flex;
+  justify-content: center;
+  padding-top: 40px;
+  padding-bottom: 40px;
+}
+
+.bmc-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  line-height: 0;
+  opacity: 0.9;
+  transition: opacity 0.15s;
+}
+
+.bmc-btn:hover {
+  opacity: 1;
+}
+
+.bmc-btn img {
+  height: 36px;
+  width: auto;
+}
