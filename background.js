@@ -27,14 +27,8 @@ function formatMatchDay(utcDate) {
 
 async function updateBadge() {
   const data = await chrome.storage.local.get(["matchesCache", "trackedTeamIds", "enabledTeams"]);
+  const matches    = data.matchesCache?.matches ?? [];
   const trackedIds = new Set(data.trackedTeamIds ?? []);
-
-  // If teams are tracked but the cache is absent (e.g. just been cleared after
-  // adding a team), leave the badge as-is — it will update once the popup
-  // re-fetches and writes a new cache.
-  if (trackedIds.size > 0 && !data.matchesCache) return;
-
-  const matches = data.matchesCache?.matches ?? [];
   // If the user has never toggled anything, all tracked teams are enabled
   const enabledIds = new Set(
     Array.isArray(data.enabledTeams) ? data.enabledTeams : [...trackedIds]
