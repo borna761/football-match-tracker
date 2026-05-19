@@ -13,34 +13,51 @@ const CACHE_TTL_MS      =      60 * 60 * 1000; // 1 hour
 const TEAM_INFO_TTL_MS  =  7 * 24 * 60 * 60 * 1000; // 7 days
 const COMP_CACHE_TTL_MS =  7 * 24 * 60 * 60 * 1000; // 7 days
 
-// ── Tracked team IDs ──────────────────────────────────────────────────────────
-function loadTrackedIds() {
+// ── Bulk load on startup ──────────────────────────────────────────────────────
+// Load all persisted state in a single storage read and populate globals.
+// Returns the raw matchesCache entry (may be stale) for SWR use.
+function loadAllState() {
   return new Promise((resolve) => {
-    chrome.storage.local.get("trackedTeamIds", (data) => {
-      TEAM_IDS = Array.isArray(data.trackedTeamIds) ? data.trackedTeamIds : [];
-      resolve();
-    });
+    chrome.storage.local.get(
+      ["trackedTeamIds", "enabledTeams", "teamsCache", "matchesCache"],
+      (data) => {
+        // Team IDs
+        TEAM_IDS = Array.isArray(data.trackedTeamIds) ? data.trackedTeamIds : [];
+        TRACKED_IDS = new Set(TEAM_IDS);
+
+        // Enabled teams
+        if (Array.isArray(data.enabledTeams)) {
+          enabledTeamIds = new Set(data.enabledTeams.filter((id) => TRACKED_IDS.has(id)));
+        } else {
+          enabledTeamIds = new Set(TEAM_IDS);
+        }
+
+        // Teams metadata cache
+        const tc = data.teamsCache;
+        const freshTeams =
+          tc &&
+          tc.fingerprint === teamsFingerprint() &&
+          Date.now() - tc.timestamp <= TEAM_INFO_TTL_MS
+            ? tc.teams
+            : null;
+
+        // Match cache (returned raw so the caller can decide stale-while-revalidate)
+        const mc = data.matchesCache;
+        const matchCache =
+          mc && mc.fingerprint === matchesFingerprint() ? mc : null;
+
+        resolve({ freshTeams, matchCache });
+      }
+    );
   });
 }
 
+// ── Tracked team IDs ──────────────────────────────────────────────────────────
 function saveTrackedIds() {
   chrome.storage.local.set({ trackedTeamIds: TEAM_IDS });
 }
 
 // ── Enabled teams (toggle state) ──────────────────────────────────────────────
-function loadEnabledTeams() {
-  return new Promise((resolve) => {
-    chrome.storage.local.get("enabledTeams", (data) => {
-      if (Array.isArray(data.enabledTeams)) {
-        enabledTeamIds = new Set(data.enabledTeams.filter((id) => TRACKED_IDS.has(id)));
-      } else {
-        enabledTeamIds = new Set(TEAM_IDS);
-      }
-      resolve();
-    });
-  });
-}
-
 function saveEnabledTeams() {
   chrome.storage.local.set({ enabledTeams: [...enabledTeamIds] });
 }

@@ -377,27 +377,48 @@ async function load() {
 
 if (typeof document !== "undefined") {
   document.addEventListener("DOMContentLoaded", async () => {
-    await loadTrackedIds();
-    TRACKED_IDS = new Set(TEAM_IDS);
-    await loadEnabledTeams();
+    // Single storage read populates all globals at once
+    const { freshTeams, matchCache } = await loadAllState();
 
     document.getElementById("settings-btn").addEventListener("click", () => {
       if (_settingsOpen) closeSettings();
       else openSettings();
     });
 
-    // Load team metadata first, then matches — sequential so both don't
-    // compete for the 10 req/min rate limit on a cold cache.
-    let freshTeams = await loadTeams();
-    if (!freshTeams) {
+    // Fetch team metadata if cache is missing or stale
+    if (freshTeams) {
+      TEAMS.push(...freshTeams);
+    } else {
       setLoadingText("Fetching team data…");
-      freshTeams = await fetchAllTeams();
-      saveTeams(freshTeams);
+      const fetched = await fetchAllTeams();
+      saveTeams(fetched);
+      TEAMS.push(...fetched);
     }
-    TEAMS.push(...freshTeams);
     renderCrests();
 
-    setLoadingText("Loading matches…");
-    await load();
+    // ── Stale-while-revalidate ──────────────────────────────────────────────
+    // If we have cached matches (even stale), render them instantly so the
+    // popup feels immediate. Then silently re-fetch in the background if the
+    // cache is expired, and update the UI when the fresh data arrives.
+    if (matchCache) {
+      _lastMatches = matchCache.matches;
+      const hasLive = await renderMatches(matchCache.matches);
+      if (hasLive) scheduleLiveRefresh(matchCache.matches);
+
+      // Re-fetch in background if stale (don't show spinner)
+      if (Date.now() - matchCache.timestamp >= CACHE_TTL_MS) {
+        const fresh = await fetchAllMatches();
+        if (fresh.length > 0 || TEAMS.length === 0) {
+          const cache = saveCache(fresh);
+          _lastMatches = cache.matches;
+          const stillLive = await renderMatches(cache.matches);
+          if (stillLive) scheduleLiveRefresh(cache.matches);
+          else clearTimeout(_liveTimer);
+        }
+      }
+    } else {
+      setLoadingText("Loading matches…");
+      await load();
+    }
   });
 }

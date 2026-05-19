@@ -84,10 +84,29 @@ function normalizeTeam(name) {
     .replace(/[^a-z0-9]/g, "");
 }
 
+// ── FotMob in-memory cache ────────────────────────────────────────────────────
+// Keyed by date string, entries expire after 5 minutes. Prevents hammering
+// the FotMob API on every 30-second live refresh within the same popup session.
+const _fotmobCache = {};
+const FOTMOB_CACHE_TTL_MS = 5 * 60 * 1000;
+
 // ── Fetch FotMob match URLs ───────────────────────────────────────────────────
 async function fetchFotmobUrls(dates) {
   const map = {};
-  await Promise.allSettled(dates.slice(0, 5).map(async (dateStr) => {
+  const now = Date.now();
+  const toFetch = [];
+
+  // Serve still-fresh entries from memory; collect stale/missing dates to fetch
+  for (const dateStr of dates.slice(0, 5)) {
+    const cached = _fotmobCache[dateStr];
+    if (cached && now - cached.ts < FOTMOB_CACHE_TTL_MS) {
+      Object.assign(map, cached.data);
+    } else {
+      toFetch.push(dateStr);
+    }
+  }
+
+  await Promise.allSettled(toFetch.map(async (dateStr) => {
     const path = `/api/data/matches?date=${dateStr.replace(/-/g, "")}&timezone=UTC`;
     const res = await fetch("https://www.fotmob.com" + path, {
       headers: {
@@ -98,13 +117,14 @@ async function fetchFotmobUrls(dates) {
     });
     if (!res.ok) return;
     const data = await res.json();
+    const dateMap = {};
     for (const league of (data.leagues || [])) {
       for (const match of (league.matches || [])) {
         const hName = match.home?.name;
         const aName = match.away?.name;
         if (!hName || !aName || !match.id) continue;
         const key = `${normalizeTeam(hName)}|${normalizeTeam(aName)}`;
-        map[key] = {
+        dateMap[key] = {
           url: `https://www.fotmob.com/match/${match.id}`,
           live: match.status?.ongoing
             ? { home: match.home?.score, away: match.away?.score, minute: match.status?.liveTime?.short ?? null }
@@ -112,6 +132,8 @@ async function fetchFotmobUrls(dates) {
         };
       }
     }
+    _fotmobCache[dateStr] = { ts: Date.now(), data: dateMap };
+    Object.assign(map, dateMap);
   }));
   return map;
 }
