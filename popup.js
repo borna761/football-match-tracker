@@ -316,6 +316,19 @@ async function load() {
     let cache = await loadCache();
     if (!cache) {
       const matches = await fetchAllMatches();
+      if (matches.length === 0 && TEAMS.length > 0) {
+        const container = document.getElementById("matches-container");
+        container.innerHTML = "";
+        const el = document.createElement("div");
+        el.id = "error";
+        el.textContent = "Failed to load matches — API may be rate limited. ";
+        const retry = document.createElement("a");
+        retry.textContent = "Try again";
+        retry.addEventListener("click", load);
+        el.appendChild(retry);
+        container.appendChild(el);
+        return;
+      }
       cache = saveCache(matches);
     }
     _lastMatches = cache.matches;
