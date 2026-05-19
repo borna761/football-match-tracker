@@ -1,11 +1,13 @@
-// Cache fingerprints include the manifest version so bumping the version in
-// manifest.json automatically invalidates all stored caches.
+// Team cache includes the manifest version so that releasing a new version
+// automatically re-fetches team metadata (name, crest, national flag).
+// Match cache only depends on which teams are tracked — match data format
+// doesn't change between releases, so version bumps don't bust it.
 const APP_VERSION = (typeof chrome !== "undefined" && chrome.runtime)
   ? chrome.runtime.getManifest().version
   : "0";
 
 function teamsFingerprint()   { return `t:${APP_VERSION}:${TEAM_IDS.join(",")}`; }
-function matchesFingerprint() { return `m:${APP_VERSION}:${TEAM_IDS.join(",")}`; }
+function matchesFingerprint() { return TEAM_IDS.join(","); }
 
 const CACHE_TTL_MS      =      60 * 60 * 1000; // 1 hour
 const TEAM_INFO_TTL_MS  =  7 * 24 * 60 * 60 * 1000; // 7 days
