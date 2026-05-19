@@ -1,154 +1,51 @@
-// API_KEY is loaded from config.js (see config.example.js)
-// Pure utility functions are loaded from utils.js
+// Shared mutable state — read and written by storage.js, api.js, settings.js
+let TEAM_IDS = [];
+let TEAMS    = [];
+let TRACKED_IDS    = new Set();
+let enabledTeamIds = new Set();
 
-// Add or remove IDs to change which teams are tracked
-const TEAM_IDS = [57, 81, 108, 762, 760, 792];
-
-const CACHE_TTL_MS = 60 * 60 * 1000;
-const TEAM_INFO_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
-const LOOKAHEAD_DAYS = 60;
-
-// Populated from API/cache before first render — treat as read-only after init
-let TEAMS = [];
-
-// Statuses to exclude entirely from the list
 const EXCLUDED_STATUSES = new Set(["POSTPONED", "CANCELLED", "SUSPENDED"]);
 
-// ── API ──────────────────────────────────────────────────────────────────────
-async function fetchMatches(team) {
-  const from = new Date();
-  const to = new Date();
-  to.setDate(to.getDate() + LOOKAHEAD_DAYS);
-  const url = `https://api.football-data.org/v4/teams/${team.id}/matches?dateFrom=${isoDate(from)}&dateTo=${isoDate(to)}`;
-  const res = await fetch(url, {
-    headers: { "X-Auth-Token": API_KEY },
-  });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  const json = await res.json();
-  if (json.errorCode) throw new Error(json.message);
-  const remaining = parseInt(res.headers.get("X-Requests-Available-Minute") ?? "10", 10);
-  const resetSecs = parseInt(res.headers.get("X-RequestCounter-Reset") ?? "0", 10);
-  return { matches: json.matches || [], remaining, resetSecs };
-}
+// ── Team management ───────────────────────────────────────────────────────────
+async function addTeam(id, knownInfo = null) {
+  if (TEAM_IDS.includes(id)) return;
 
-async function fetchAllMatches() {
-  const allMatches = [];
-  const seen = new Set();
-
-  for (const team of TEAMS) {
+  let info = knownInfo;
+  if (!info) {
     try {
-      const { matches, remaining, resetSecs } = await fetchMatches(team);
-      for (const match of matches) {
-        if (!seen.has(match.id)) {
-          seen.add(match.id);
-          allMatches.push(match);
-        }
-      }
-      if (remaining <= 1 && resetSecs > 0) {
-        await new Promise((r) => setTimeout(r, resetSecs * 1000 + 200));
-      }
-    } catch (err) {
-      console.error(`${team.name}:`, err.message);
+      info = await fetchTeamInfo(id);
+    } catch {
+      info = { id, name: String(id), shortName: String(id), crest: null, national: false };
     }
   }
 
-  allMatches.sort((a, b) => new Date(a.utcDate) - new Date(b.utcDate));
-  return allMatches;
+  TEAM_IDS.push(id);
+  TRACKED_IDS.add(id);
+  enabledTeamIds.add(id);
+  TEAMS.push(info);
+
+  saveTrackedIds();
+  saveEnabledTeams();
+  saveTeams(TEAMS);
+  chrome.storage.local.remove("matchesCache");
+  renderCrests();
 }
 
-// ── Enabled teams ────────────────────────────────────────────────────────────
-const TRACKED_IDS = new Set(TEAM_IDS);
-let enabledTeamIds = new Set(TEAM_IDS); // all on by default
+function removeTeam(id) {
+  TEAM_IDS = TEAM_IDS.filter((x) => x !== id);
+  TRACKED_IDS.delete(id);
+  enabledTeamIds.delete(id);
+  const idx = TEAMS.findIndex((t) => t.id === id);
+  if (idx !== -1) TEAMS.splice(idx, 1);
 
-function loadEnabledTeams() {
-  return new Promise((resolve) => {
-    chrome.storage.local.get("enabledTeams", (data) => {
-      if (Array.isArray(data.enabledTeams)) {
-        enabledTeamIds = new Set(data.enabledTeams.filter((id) => TRACKED_IDS.has(id)));
-      }
-      resolve();
-    });
-  });
+  saveTrackedIds();
+  saveEnabledTeams();
+  saveTeams(TEAMS);
+  chrome.storage.local.remove("matchesCache");
+  renderCrests();
 }
 
-function saveEnabledTeams() {
-  chrome.storage.local.set({ enabledTeams: [...enabledTeamIds] });
-}
-
-// ── Cache ────────────────────────────────────────────────────────────────────
-const TEAMS_FINGERPRINT = TEAM_IDS.join(",");
-
-function loadCache() {
-  return new Promise((resolve) => {
-    chrome.storage.local.get("matchesCache", (data) => {
-      const cache = data.matchesCache;
-      if (!cache) return resolve(null);
-      if (cache.fingerprint !== TEAMS_FINGERPRINT) return resolve(null); // teams changed
-      resolve(Date.now() - cache.timestamp < CACHE_TTL_MS ? cache : null);
-    });
-  });
-}
-
-function saveCache(matches) {
-  const cache = { matches, timestamp: Date.now(), fingerprint: TEAMS_FINGERPRINT };
-  chrome.storage.local.set({ matchesCache: cache });
-  return cache;
-}
-
-// ── Team info ────────────────────────────────────────────────────────────────
-async function fetchTeamInfo(id) {
-  const res = await fetch(`https://api.football-data.org/v4/teams/${id}`, {
-    headers: { "X-Auth-Token": API_KEY },
-  });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  const json = await res.json();
-  const remaining = parseInt(res.headers.get("X-Requests-Available-Minute") ?? "10", 10);
-  const resetSecs = parseInt(res.headers.get("X-RequestCounter-Reset") ?? "0", 10);
-  if (remaining <= 1 && resetSecs > 0) {
-    await new Promise((r) => setTimeout(r, resetSecs * 1000 + 200));
-  }
-  return {
-    id,
-    name:      json.name,
-    shortName: json.shortName,
-    crest:     json.crest,
-    national:  json.type === "NATIONAL",
-  };
-}
-
-function loadTeams() {
-  return new Promise((resolve) => {
-    chrome.storage.local.get("teamsCache", (data) => {
-      const cache = data.teamsCache;
-      if (!cache) return resolve(null);
-      if (cache.fingerprint !== TEAMS_FINGERPRINT) return resolve(null);
-      if (Date.now() - cache.timestamp > TEAM_INFO_TTL_MS) return resolve(null);
-      resolve(cache.teams);
-    });
-  });
-}
-
-function saveTeams(teams) {
-  chrome.storage.local.set({
-    teamsCache: { teams, timestamp: Date.now(), fingerprint: TEAMS_FINGERPRINT },
-  });
-}
-
-async function fetchAllTeams() {
-  const results = [];
-  for (const id of TEAM_IDS) {
-    try {
-      results.push(await fetchTeamInfo(id));
-    } catch (err) {
-      console.error(`Team ${id}:`, err.message);
-      // Fallback: bare object so the rest of the UI still works
-      results.push({ id, name: String(id), shortName: String(id), crest: null, national: false });
-    }
-  }
-  return results;
-}
-
-// ── Rendering ────────────────────────────────────────────────────────────────
+// ── Match rendering ───────────────────────────────────────────────────────────
 function logoEl(team) {
   if (!team.crest) {
     const div = document.createElement("div");
@@ -196,7 +93,6 @@ function renderMatch(match, fotmobData) {
   center.className = "match-time";
 
   if (isFinished) {
-    // fullTime is always populated on FINISHED matches
     const ft = score.fullTime;
     const scoreEl = document.createElement("div");
     scoreEl.className = "match-score";
@@ -205,7 +101,6 @@ function renderMatch(match, fotmobData) {
   } else if (isHalfTime || isLive) {
     const liveData = fotmobData?.live;
     if (liveData && liveData.home !== null && liveData.away !== null) {
-      // FotMob says the match is in play — show live score + minute
       const scoreEl = document.createElement("div");
       scoreEl.className = "match-score live";
       scoreEl.textContent = `${liveData.home} – ${liveData.away}`;
@@ -215,7 +110,6 @@ function renderMatch(match, fotmobData) {
       minuteEl.textContent = liveData.minute ?? "LIVE";
       center.appendChild(minuteEl);
     } else if (isHalfTime) {
-      // FotMob has no live data — show HT badge + half-time score
       const badge = document.createElement("div");
       badge.className = "live-badge";
       badge.textContent = "HT";
@@ -228,7 +122,6 @@ function renderMatch(match, fotmobData) {
         center.appendChild(scoreEl);
       }
     } else {
-      // IN_PLAY but no FotMob data
       const badge = document.createElement("div");
       badge.className = "live-badge";
       badge.textContent = "LIVE";
@@ -274,24 +167,24 @@ async function renderMatches(matches) {
   const isRefresh = container.children.length > 0 && !container.querySelector("#loading");
 
   const todayStr = localIsoDate(new Date());
-  const visible = filterMatches(matches, todayStr, TRACKED_IDS, enabledTeamIds);
+  const visible  = filterMatches(matches, todayStr, TRACKED_IDS, enabledTeamIds);
 
   const todayCount = visible.filter((m) => localIsoDate(new Date(m.utcDate)) === todayStr).length;
   chrome.action.setBadgeText({ text: todayCount > 0 ? String(todayCount) : "" });
   chrome.action.setBadgeBackgroundColor({ color: "#f97316" });
 
-  // Do all async work before touching the DOM
   const fotmobMap = visible.length > 0
     ? await fetchFotmobUrls([...new Set(visible.map((m) => isoDate(new Date(m.utcDate))))])
     : {};
 
-  // Build new content off-screen in a fragment
   const fragment = document.createDocumentFragment();
 
   if (visible.length === 0) {
     const el = document.createElement("div");
     el.className = "no-matches";
-    el.textContent = "No upcoming matches in the next 60 days.";
+    el.textContent = TEAM_IDS.length === 0
+      ? "No teams tracked. Use the ⚙ settings to add teams."
+      : "No upcoming matches in the next 60 days.";
     fragment.appendChild(el);
     container.innerHTML = "";
     container.appendChild(fragment);
@@ -299,7 +192,7 @@ async function renderMatches(matches) {
   }
 
   const today    = visible.filter((m) => localIsoDate(new Date(m.utcDate)) === todayStr);
-  const upcoming = visible.filter((m) => localIsoDate(new Date(m.utcDate)) > todayStr);
+  const upcoming = visible.filter((m) => localIsoDate(new Date(m.utcDate)) >  todayStr);
 
   function appendSection(label, sectionMatches, { subgroups = false } = {}) {
     if (sectionMatches.length === 0) return null;
@@ -335,11 +228,9 @@ async function renderMatches(matches) {
   const todayHeader    = appendSection("Today", today);
   const upcomingAnchor = appendSection(null, upcoming, { subgroups: true });
 
-  // Atomic swap — no flash
   container.innerHTML = "";
   container.appendChild(fragment);
 
-  // Only scroll on first render, not on live refreshes
   if (!isRefresh) {
     const scrollTarget = todayHeader ?? upcomingAnchor;
     if (scrollTarget) {
@@ -352,6 +243,7 @@ async function renderMatches(matches) {
 
 function renderCrests() {
   const container = document.getElementById("team-crests");
+  container.innerHTML = "";
   const sorted = [
     ...TEAMS.filter((t) => !t.national).sort((a, b) => a.name.localeCompare(b.name)),
     ...TEAMS.filter((t) =>  t.national).sort((a, b) => a.name.localeCompare(b.name)),
@@ -379,7 +271,7 @@ function renderCrests() {
       }
       img.classList.toggle("crest-off", !enabledTeamIds.has(team.id));
       saveEnabledTeams();
-      if (_lastMatches) renderMatches(_lastMatches);
+      if (_lastMatches && !_settingsOpen) renderMatches(_lastMatches);
     });
     container.appendChild(img);
   }
@@ -389,11 +281,10 @@ function showError(msg) {
   document.getElementById("matches-container").innerHTML = `<div id="error">${msg}</div>`;
 }
 
-// ── Init ─────────────────────────────────────────────────────────────────────
-let _liveTimer = null;
+// ── Init ──────────────────────────────────────────────────────────────────────
+let _liveTimer  = null;
 let _lastMatches = null;
 
-// Re-render every 30s using cached match data (only re-fetches FotMob live scores)
 async function scheduleLiveRefresh(cachedMatches) {
   clearTimeout(_liveTimer);
   _liveTimer = setTimeout(async () => {
@@ -422,26 +313,25 @@ async function load() {
 
 if (typeof document !== "undefined") {
   document.addEventListener("DOMContentLoaded", async () => {
+    await loadTrackedIds();
+    TRACKED_IDS = new Set(TEAM_IDS);
     await loadEnabledTeams();
 
-    // Seed TEAMS with minimal stubs so fetchAllMatches can start immediately
-    TEAMS.push(...TEAM_IDS.map((id) => ({ id, name: String(id), shortName: String(id), crest: null, national: false })));
+    document.getElementById("settings-btn").addEventListener("click", () => {
+      if (_settingsOpen) closeSettings();
+      else openSettings();
+    });
 
-    // Load matches right away — don't block on team metadata
-    const matchLoadPromise = load();
-
-    // Fetch team metadata (cached 7 days) in parallel
+    // Load team metadata first, then matches — sequential so both don't
+    // compete for the 10 req/min rate limit on a cold cache.
     let freshTeams = await loadTeams();
     if (!freshTeams) {
       freshTeams = await fetchAllTeams();
       saveTeams(freshTeams);
     }
-
-    // Swap stubs for real data and render crests
-    TEAMS.length = 0;
     TEAMS.push(...freshTeams);
     renderCrests();
 
-    await matchLoadPromise;
+    await load();
   });
 }
