@@ -53,10 +53,14 @@ function buildSupportSection() {
 
   const btn = document.createElement("button");
   btn.className = "bmc-btn";
-  btn.textContent = "☕ Buy me a coffee";
   btn.addEventListener("click", () => {
     chrome.tabs.create({ url: "https://buymeacoffee.com/borna761" });
   });
+
+  const img = document.createElement("img");
+  img.src = "icons/bmc-button.png";
+  img.alt = "Buy me a coffee";
+  btn.appendChild(img);
 
   section.appendChild(btn);
   return section;

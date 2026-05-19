@@ -484,17 +484,20 @@ body {
 }
 
 .bmc-btn {
-  background: #FFDD00;
+  background: none;
   border: none;
-  border-radius: 999px;
-  color: #000000;
   cursor: pointer;
-  font-size: 12px;
-  font-weight: 600;
-  padding: 6px 14px;
-  transition: background 0.15s;
+  padding: 0;
+  line-height: 0;
+  opacity: 0.9;
+  transition: opacity 0.15s;
 }
 
 .bmc-btn:hover {
-  background: #ffcf00;
+  opacity: 1;
+}
+
+.bmc-btn img {
+  height: 36px;
+  width: auto;
 }
