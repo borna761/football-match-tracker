@@ -1,8 +1,8 @@
 // API_KEY is loaded from config.js (see config.example.js)
 // Pure utility functions are loaded from utils.js
 
-// Fallback used on first install before any teams are saved
-const DEFAULT_TEAM_IDS = [57, 81, 108, 762, 760, 792];
+// No default teams — users pick their own via the settings panel
+const DEFAULT_TEAM_IDS = [];
 
 // Mutable — loaded from storage, updated when user adds/removes teams
 let TEAM_IDS = [];
@@ -413,7 +413,9 @@ async function renderMatches(matches) {
   if (visible.length === 0) {
     const el = document.createElement("div");
     el.className = "no-matches";
-    el.textContent = "No upcoming matches in the next 60 days.";
+    el.textContent = TEAM_IDS.length === 0
+      ? "No teams tracked. Use the ⚙ settings to add teams."
+      : "No upcoming matches in the next 60 days.";
     fragment.appendChild(el);
     container.innerHTML = "";
     container.appendChild(fragment);
