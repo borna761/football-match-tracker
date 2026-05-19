@@ -277,6 +277,11 @@ function renderCrests() {
   }
 }
 
+function setLoadingText(msg) {
+  const span = document.querySelector("#loading span");
+  if (span) span.textContent = msg;
+}
+
 function showError(msg) {
   const container = document.getElementById("matches-container");
   container.innerHTML = "";
@@ -331,12 +336,14 @@ if (typeof document !== "undefined") {
     // compete for the 10 req/min rate limit on a cold cache.
     let freshTeams = await loadTeams();
     if (!freshTeams) {
+      setLoadingText("Fetching team data…");
       freshTeams = await fetchAllTeams();
       saveTeams(freshTeams);
     }
     TEAMS.push(...freshTeams);
     renderCrests();
 
+    setLoadingText("Loading matches…");
     await load();
   });
 }
