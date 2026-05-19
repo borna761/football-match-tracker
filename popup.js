@@ -6,6 +6,15 @@ let enabledTeamIds = new Set();
 
 const EXCLUDED_STATUSES = new Set(["POSTPONED", "CANCELLED", "SUSPENDED"]);
 
+// ── Match cache patching ──────────────────────────────────────────────────────
+// Read the raw cache from storage, bypassing the fingerprint check, so we can
+// merge or re-sign it after a team change without a full re-fetch.
+async function readRawMatchCache() {
+  return new Promise((resolve) => {
+    chrome.storage.local.get("matchesCache", (data) => resolve(data.matchesCache ?? null));
+  });
+}
+
 // ── Team management ───────────────────────────────────────────────────────────
 async function addTeam(id, knownInfo = null) {
   if (TEAM_IDS.includes(id)) return;
@@ -27,7 +36,27 @@ async function addTeam(id, knownInfo = null) {
   saveTrackedIds();
   saveEnabledTeams();
   saveTeams(TEAMS);
-  chrome.storage.local.remove("matchesCache");
+
+  // Fetch only this team's matches and merge into the existing cache so we
+  // don't need to re-fetch every other team again.
+  const existing = await readRawMatchCache();
+  if (existing) {
+    try {
+      const { matches: fresh } = await fetchMatches(info);
+      const seen = new Set(existing.matches.map((m) => m.id));
+      const merged = [...existing.matches];
+      for (const m of fresh) {
+        if (!seen.has(m.id)) merged.push(m);
+      }
+      merged.sort((a, b) => new Date(a.utcDate) - new Date(b.utcDate));
+      saveCache(merged); // re-signs with updated fingerprint (new TEAM_IDS)
+    } catch {
+      // Fetch failed — clear so load() starts fresh on next open
+      chrome.storage.local.remove("matchesCache");
+    }
+  }
+  // No existing cache — leave it absent so load() does a full fetch naturally
+
   renderCrests();
 }
 
@@ -41,7 +70,14 @@ function removeTeam(id) {
   saveTrackedIds();
   saveEnabledTeams();
   saveTeams(TEAMS);
-  chrome.storage.local.remove("matchesCache");
+
+  // No API call needed — re-save the existing cache with the updated
+  // fingerprint so it stays valid. filterMatches will exclude the removed
+  // team's matches since they're no longer in TRACKED_IDS.
+  readRawMatchCache().then((existing) => {
+    if (existing) saveCache(existing.matches);
+  });
+
   renderCrests();
 }
 
