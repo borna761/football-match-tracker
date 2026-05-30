@@ -157,21 +157,44 @@ function _namesMatch(a, b) {
   return i >= 5;
 }
 
+// Build a deduplicated list of normalised name variants for a team,
+// trying both the full name and shortName so abbreviations like "PSG"
+// are checked directly against the FotMob key.
+function _teamVariants(team) {
+  const variants = [normalizeTeam(team.name)];
+  if (team.shortName) {
+    const s = normalizeTeam(team.shortName);
+    if (s && s !== variants[0]) variants.push(s);
+  }
+  return variants;
+}
+
 // exported for testing
 function getFotmobData(match, fotmobMap) {
-  const hN = normalizeTeam(match.homeTeam.name);
-  const aN = normalizeTeam(match.awayTeam.name);
-  const direct = fotmobMap[`${hN}|${aN}`];
-  if (direct) return direct;
+  const homeV = _teamVariants(match.homeTeam);
+  const awayV = _teamVariants(match.awayTeam);
+
+  // Direct lookup — try every name/shortName combination
+  for (const hN of homeV) {
+    for (const aN of awayV) {
+      const hit = fotmobMap[`${hN}|${aN}`];
+      if (hit) return hit;
+    }
+  }
+
+  // Fuzzy match — prefix / substring fallback
   for (const [key, entry] of Object.entries(fotmobMap)) {
     const [fmH, fmA] = key.split("|");
-    if (_namesMatch(hN, fmH) && _namesMatch(aN, fmA)) return entry;
+    if (homeV.some(h => _namesMatch(h, fmH)) && awayV.some(a => _namesMatch(a, fmA))) {
+      return entry;
+    }
   }
+
   const home = match.homeTeam.shortName || match.homeTeam.name;
   const away = match.awayTeam.shortName || match.awayTeam.name;
   return { url: `https://www.fotmob.com/search?q=${encodeURIComponent(`${home} ${away}`)}`, live: null };
 }
 
 if (typeof module !== "undefined") {
-  module.exports = { normalizeTeam, getFotmobData, _namesMatch };
+  module.exports = { normalizeTeam, getFotmobData, _namesMatch, _teamVariants };
 }
