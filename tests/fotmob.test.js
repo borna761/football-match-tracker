@@ -1,4 +1,4 @@
-const { normalizeTeam, getFotmobData } = require("../fotmob");
+const { normalizeTeam, getFotmobData, _namesMatch } = require("../fotmob");
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -37,6 +37,36 @@ describe("normalizeTeam", () => {
 
   test("handles a long name like FC Internazionale Milano", () => {
     expect(normalizeTeam("FC Internazionale Milano")).toBe("internazionalemilano");
+  });
+});
+
+// ── _namesMatch ───────────────────────────────────────────────────────────────
+
+describe("_namesMatch", () => {
+  test("exact match", () => {
+    expect(_namesMatch("arsenal", "arsenal")).toBe(true);
+  });
+
+  test("substring: longer contains shorter", () => {
+    expect(_namesMatch("internazionalemilano", "inter")).toBe(true);
+  });
+
+  test("substring: shorter contained in longer", () => {
+    expect(_namesMatch("inter", "internazionalemilano")).toBe(true);
+  });
+
+  test("prefix match handles PSG abbreviation", () => {
+    // FotMob: "Paris SG" → "parisg", football-data: "Paris Saint-Germain" → "parissaintgermain"
+    expect(_namesMatch("parisg", "parissaintgermain")).toBe(true);
+    expect(_namesMatch("parissaintgermain", "parisg")).toBe(true);
+  });
+
+  test("no match for clearly different teams", () => {
+    expect(_namesMatch("arsenal", "chelsea")).toBe(false);
+  });
+
+  test("no prefix match when shared prefix is under 5 chars", () => {
+    expect(_namesMatch("acmi", "acmilan")).toBe(false);
   });
 });
 
