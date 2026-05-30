@@ -85,8 +85,9 @@ function normalizeTeam(name) {
 }
 
 // ── FotMob in-memory cache ────────────────────────────────────────────────────
-// Keyed by date string, entries expire after 5 minutes. Prevents hammering
-// the FotMob API on every 30-second live refresh within the same popup session.
+// Keyed by date string. Future dates are cached for 5 minutes since their
+// match data doesn't change. Today is never cached — it may have live matches
+// whose scores update every minute and must be fetched fresh every 30 seconds.
 const _fotmobCache = {};
 const FOTMOB_CACHE_TTL_MS = 5 * 60 * 1000;
 
@@ -94,12 +95,13 @@ const FOTMOB_CACHE_TTL_MS = 5 * 60 * 1000;
 async function fetchFotmobUrls(dates) {
   const map = {};
   const now = Date.now();
+  const todayUtc = new Date().toISOString().slice(0, 10);
   const toFetch = [];
 
-  // Serve still-fresh entries from memory; collect stale/missing dates to fetch
   for (const dateStr of dates.slice(0, 5)) {
     const cached = _fotmobCache[dateStr];
-    if (cached && now - cached.ts < FOTMOB_CACHE_TTL_MS) {
+    // Never serve today from cache — live scores must be fresh
+    if (dateStr !== todayUtc && cached && now - cached.ts < FOTMOB_CACHE_TTL_MS) {
       Object.assign(map, cached.data);
     } else {
       toFetch.push(dateStr);
@@ -132,30 +134,65 @@ async function fetchFotmobUrls(dates) {
         };
       }
     }
-    _fotmobCache[dateStr] = { ts: Date.now(), data: dateMap };
+    // Only cache future dates — today must stay fresh for live scores
+    if (dateStr !== todayUtc) {
+      _fotmobCache[dateStr] = { ts: Date.now(), data: dateMap };
+    }
     Object.assign(map, dateMap);
   }));
   return map;
 }
 
+// Returns true if two normalised team names refer to the same club.
+// Handles abbreviations like "parisg" (Paris SG) vs "parissaintgermain"
+// by checking whether the shorter name is a prefix of the longer one.
+function _namesMatch(a, b) {
+  if (a === b) return true;
+  // Substring: one name contains the other (e.g. "inter" in "internazionalemilano",
+  // "asroma" contains "roma"). Minimum 4 chars avoids false positives on short prefixes
+  // like "ac" matching "acmilan" and "acMilan".
+  const [shorter, longer] = a.length <= b.length ? [a, b] : [b, a];
+  return shorter.length >= 4 && longer.includes(shorter);
+}
+
+// Build a deduplicated list of normalised name variants for a team,
+// trying both the full name and shortName so abbreviations like "PSG"
+// are checked directly against the FotMob key.
+function _teamVariants(team) {
+  const variants = [normalizeTeam(team.name)];
+  if (team.shortName) {
+    const s = normalizeTeam(team.shortName);
+    if (s && s !== variants[0]) variants.push(s);
+  }
+  return variants;
+}
+
 // exported for testing
 function getFotmobData(match, fotmobMap) {
-  const hN = normalizeTeam(match.homeTeam.name);
-  const aN = normalizeTeam(match.awayTeam.name);
-  const direct = fotmobMap[`${hN}|${aN}`];
-  if (direct) return direct;
-  // Substring fallback for names like "FC Internazionale Milano" → "inter"
+  const homeV = _teamVariants(match.homeTeam);
+  const awayV = _teamVariants(match.awayTeam);
+
+  // Direct lookup — try every name/shortName combination
+  for (const hN of homeV) {
+    for (const aN of awayV) {
+      const hit = fotmobMap[`${hN}|${aN}`];
+      if (hit) return hit;
+    }
+  }
+
+  // Fuzzy match — prefix / substring fallback
   for (const [key, entry] of Object.entries(fotmobMap)) {
     const [fmH, fmA] = key.split("|");
-    if ((hN.includes(fmH) || fmH.includes(hN)) && (aN.includes(fmA) || fmA.includes(aN))) {
+    if (homeV.some(h => _namesMatch(h, fmH)) && awayV.some(a => _namesMatch(a, fmA))) {
       return entry;
     }
   }
+
   const home = match.homeTeam.shortName || match.homeTeam.name;
   const away = match.awayTeam.shortName || match.awayTeam.name;
   return { url: `https://www.fotmob.com/search?q=${encodeURIComponent(`${home} ${away}`)}`, live: null };
 }
 
 if (typeof module !== "undefined") {
-  module.exports = { normalizeTeam, getFotmobData };
+  module.exports = { normalizeTeam, getFotmobData, _namesMatch, _teamVariants };
 }

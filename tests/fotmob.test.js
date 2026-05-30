@@ -1,4 +1,4 @@
-const { normalizeTeam, getFotmobData } = require("../fotmob");
+const { normalizeTeam, getFotmobData, _namesMatch, _teamVariants } = require("../fotmob");
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -40,6 +40,55 @@ describe("normalizeTeam", () => {
   });
 });
 
+// ── _namesMatch ───────────────────────────────────────────────────────────────
+
+describe("_namesMatch", () => {
+  test("exact match", () => {
+    expect(_namesMatch("arsenal", "arsenal")).toBe(true);
+  });
+
+  test("substring: longer contains shorter", () => {
+    expect(_namesMatch("internazionalemilano", "inter")).toBe(true);
+  });
+
+  test("substring: shorter contained in longer", () => {
+    expect(_namesMatch("inter", "internazionalemilano")).toBe(true);
+  });
+
+  test("matches short names like Roma (4 chars) contained in longer FotMob name", () => {
+    expect(_namesMatch("roma", "asroma")).toBe(true);
+  });
+
+  test("no match for clearly different teams", () => {
+    expect(_namesMatch("arsenal", "chelsea")).toBe(false);
+  });
+
+  test("no match when shared name is under 4 chars", () => {
+    expect(_namesMatch("ac", "acmilan")).toBe(false);
+  });
+
+  test("no false positive for teams sharing a long common prefix (Sporting CP vs Lisbon)", () => {
+    expect(_namesMatch("sportingcp", "sportinglisbon")).toBe(false);
+  });
+});
+
+// ── _teamVariants ─────────────────────────────────────────────────────────────
+
+describe("_teamVariants", () => {
+  test("returns just the name when shortName is absent", () => {
+    expect(_teamVariants({ name: "Arsenal", shortName: null })).toEqual(["arsenal"]);
+  });
+
+  test("returns both variants when shortName differs from name", () => {
+    expect(_teamVariants({ name: "Paris Saint-Germain", shortName: "PSG" }))
+      .toEqual(["parissaintgermain", "psg"]);
+  });
+
+  test("deduplicates when shortName normalises to the same value as name", () => {
+    expect(_teamVariants({ name: "Arsenal", shortName: "Arsenal" })).toEqual(["arsenal"]);
+  });
+});
+
 // ── getFotmobData — direct match ──────────────────────────────────────────────
 
 describe("getFotmobData — direct match", () => {
@@ -61,6 +110,21 @@ describe("getFotmobData — direct match", () => {
     const map = { "arsenal|burnley": makeEntry(999, { ongoing: false }) };
     const result = getFotmobData(makeMatch("Arsenal", "Burnley"), map);
     expect(result.live).toBeNull();
+  });
+});
+
+// ── getFotmobData — shortName fallback ───────────────────────────────────────
+
+describe("getFotmobData — shortName fallback", () => {
+  test("matches via shortName when FotMob uses the abbreviation (PSG case)", () => {
+    // football-data: name="Paris Saint-Germain", shortName="PSG"
+    // FotMob key uses "PSG" → "psg"
+    const map = { "psg|arsenal": makeEntry(99) };
+    const match = {
+      homeTeam: { name: "Paris Saint-Germain", shortName: "PSG" },
+      awayTeam: { name: "Arsenal", shortName: "Arsenal" },
+    };
+    expect(getFotmobData(match, map).url).toBe("https://www.fotmob.com/match/99");
   });
 });
 
