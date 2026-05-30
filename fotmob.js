@@ -148,13 +148,11 @@ async function fetchFotmobUrls(dates) {
 // by checking whether the shorter name is a prefix of the longer one.
 function _namesMatch(a, b) {
   if (a === b) return true;
-  // Substring: only if the shorter string is ≥5 chars to avoid false positives
+  // Substring: one name contains the other (e.g. "inter" in "internazionalemilano",
+  // "asroma" contains "roma"). Minimum 4 chars avoids false positives on short prefixes
+  // like "ac" matching "acmilan" and "acMilan".
   const [shorter, longer] = a.length <= b.length ? [a, b] : [b, a];
-  if (shorter.length >= 5 && longer.includes(shorter)) return true;
-  // Shared prefix ≥5 chars handles abbreviations like "parisg" vs "parissaintgermain"
-  let i = 0;
-  while (i < a.length && i < b.length && a[i] === b[i]) i++;
-  return i >= 5;
+  return shorter.length >= 4 && longer.includes(shorter);
 }
 
 // Build a deduplicated list of normalised name variants for a team,

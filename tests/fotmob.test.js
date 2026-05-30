@@ -55,18 +55,20 @@ describe("_namesMatch", () => {
     expect(_namesMatch("inter", "internazionalemilano")).toBe(true);
   });
 
-  test("prefix match handles PSG abbreviation", () => {
-    // FotMob: "Paris SG" → "parisg", football-data: "Paris Saint-Germain" → "parissaintgermain"
-    expect(_namesMatch("parisg", "parissaintgermain")).toBe(true);
-    expect(_namesMatch("parissaintgermain", "parisg")).toBe(true);
+  test("matches short names like Roma (4 chars) contained in longer FotMob name", () => {
+    expect(_namesMatch("roma", "asroma")).toBe(true);
   });
 
   test("no match for clearly different teams", () => {
     expect(_namesMatch("arsenal", "chelsea")).toBe(false);
   });
 
-  test("no prefix match when shared prefix is under 5 chars", () => {
-    expect(_namesMatch("acmi", "acmilan")).toBe(false);
+  test("no match when shared name is under 4 chars", () => {
+    expect(_namesMatch("ac", "acmilan")).toBe(false);
+  });
+
+  test("no false positive for teams sharing a long common prefix (Sporting CP vs Lisbon)", () => {
+    expect(_namesMatch("sportingcp", "sportinglisbon")).toBe(false);
   });
 });
 
