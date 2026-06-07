@@ -1,16 +1,18 @@
 // Free-tier competitions available on football-data.org
 const COMPETITIONS = [
-  { code: "PL",  name: "Premier League" },
-  { code: "PD",  name: "La Liga" },
+  // Club competitions — sorted alphabetically
   { code: "BL1", name: "Bundesliga" },
-  { code: "SA",  name: "Serie A" },
-  { code: "FL1", name: "Ligue 1" },
-  { code: "CL",  name: "Champions League" },
-  { code: "WC",  name: "World Cup" },
-  { code: "EC",  name: "European Championship" },
   { code: "ELC", name: "Championship" },
+  { code: "CL",  name: "Champions League" },
   { code: "DED", name: "Eredivisie" },
+  { code: "PD",  name: "La Liga" },
+  { code: "FL1", name: "Ligue 1" },
+  { code: "PL",  name: "Premier League" },
   { code: "PPL", name: "Primeira Liga" },
+  { code: "SA",  name: "Serie A" },
+  // National team competitions — sorted alphabetically
+  { code: "EC",  name: "European Championship", national: true },
+  { code: "WC",  name: "World Cup",             national: true },
 ];
 
 let _settingsOpen = false;
@@ -112,12 +114,29 @@ function buildAddSection() {
   placeholder.value = "";
   placeholder.textContent = "Pick a competition…";
   compSelect.appendChild(placeholder);
-  for (const comp of COMPETITIONS) {
+
+  const clubs    = COMPETITIONS.filter((c) => !c.national);
+  const national = COMPETITIONS.filter((c) =>  c.national);
+
+  const clubGroup = document.createElement("optgroup");
+  clubGroup.label = "Club Competitions";
+  for (const comp of clubs) {
     const opt = document.createElement("option");
     opt.value = comp.code;
     opt.textContent = comp.name;
-    compSelect.appendChild(opt);
+    clubGroup.appendChild(opt);
   }
+  compSelect.appendChild(clubGroup);
+
+  const nationalGroup = document.createElement("optgroup");
+  nationalGroup.label = "National Teams";
+  for (const comp of national) {
+    const opt = document.createElement("option");
+    opt.value = comp.code;
+    opt.textContent = comp.name;
+    nationalGroup.appendChild(opt);
+  }
+  compSelect.appendChild(nationalGroup);
 
   const searchInput = document.createElement("input");
   searchInput.type = "text";
