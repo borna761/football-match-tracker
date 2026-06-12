@@ -124,14 +124,14 @@ async function checkNotifications() {
     const title = notifyBefore === 0
       ? "Match starting now"
       : notifyBefore === 60
-        ? "Match in 1 hour"
-        : `Match in ${notifyBefore} min`;
+        ? "Match starts in 1 hour"
+        : `Match starts in ${notifyBefore} min`;
 
     chrome.notifications.create(`match-${matchId}`, {
       type: "basic",
       iconUrl: "icons/icon48.png",
       title,
-      message: `${home} vs ${away} · ${timeStr}`,
+      message: `${home} vs ${away} (${match.competition.name}) · ${timeStr}`,
     });
 
     notified[matchId] = now;
