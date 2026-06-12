@@ -477,6 +477,24 @@ body {
   font-size: 12px;
 }
 
+/* ── Notification setting ── */
+.settings-notify-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.settings-notify-label {
+  font-size: 13px;
+  color: var(--text);
+}
+
+.settings-select--inline {
+  flex: 0 0 auto;
+  width: auto;
+}
+
 /* ── Support ── */
 .settings-section--support {
   display: flex;
