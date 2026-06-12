@@ -80,6 +80,8 @@ async function checkNotifications() {
     "notifyMinutesBefore", "notifiedMatchIds",
   ]);
 
+  // Default 15 is written to storage by onInstalled; the fallback here is a
+  // safety net for the very first run before onInstalled has completed.
   const notifyBefore = typeof data.notifyMinutesBefore === "number"
     ? data.notifyMinutesBefore
     : 15;
@@ -111,7 +113,9 @@ async function checkNotifications() {
     if (notified[matchId]) continue;
 
     const minsUntil = (new Date(match.utcDate).getTime() - now) / 60_000;
-    if (minsUntil > notifyBefore || minsUntil < -2) continue;
+    // +1 gives a 1-minute grace window for alarm granularity; ensures
+    // notifyBefore=0 ("at kickoff") can still fire before the match starts.
+    if (minsUntil > notifyBefore + 1 || minsUntil < -2) continue;
 
     const home = match.homeTeam.shortName || match.homeTeam.name;
     const away = match.awayTeam.shortName || match.awayTeam.name;
@@ -119,7 +123,9 @@ async function checkNotifications() {
 
     const title = notifyBefore === 0
       ? "Match starting now"
-      : `Match in ${notifyBefore} min`;
+      : notifyBefore === 60
+        ? "Match in 1 hour"
+        : `Match in ${notifyBefore} min`;
 
     chrome.notifications.create(`match-${matchId}`, {
       type: "basic",
@@ -132,14 +138,36 @@ async function checkNotifications() {
     changed = true;
   }
 
-  if (changed) chrome.storage.local.set({ notifiedMatchIds: notified });
+  if (changed) {
+    // Re-read before writing to avoid last-writer-wins clobbering a concurrent
+    // checkNotifications execution that may have written new entries between our
+    // initial get and now.
+    chrome.storage.local.get("notifiedMatchIds", (latest) => {
+      const merged = { ...latest.notifiedMatchIds ?? {}, ...notified };
+      // Re-apply purge to any stale entries that arrived via the re-read.
+      for (const [id, ts] of Object.entries(merged)) {
+        if (ts <= cutoff) delete merged[id];
+      }
+      chrome.storage.local.set({ notifiedMatchIds: merged });
+    });
+  }
 }
 
 // Update badge when the browser starts
 chrome.runtime.onStartup.addListener(() => { updateBadge(); checkNotifications(); });
 
-// Update badge on first install / extension reload
-chrome.runtime.onInstalled.addListener(() => { updateBadge(); checkNotifications(); });
+// Update badge on first install / extension reload.
+// Also seed the default notification preference so background.js and
+// settings.js both read from storage rather than separate hardcoded fallbacks.
+chrome.runtime.onInstalled.addListener(() => {
+  chrome.storage.local.get("notifyMinutesBefore", (data) => {
+    if (typeof data.notifyMinutesBefore !== "number") {
+      chrome.storage.local.set({ notifyMinutesBefore: 15 });
+    }
+  });
+  updateBadge();
+  checkNotifications();
+});
 
 // Badge: every hour. Notifications: every minute.
 chrome.alarms.create("updateBadge",        { periodInMinutes: 60 });

@@ -89,6 +89,8 @@ function buildNotificationsSection() {
   }
 
   chrome.storage.local.get("notifyMinutesBefore", (data) => {
+    // Default 15 is seeded by onInstalled in background.js; the fallback here
+    // is a safety net for the very first run before that write completes.
     select.value = typeof data.notifyMinutesBefore === "number"
       ? data.notifyMinutesBefore
       : 15;
