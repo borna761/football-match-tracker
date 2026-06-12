@@ -47,7 +47,60 @@ function renderSettingsPanel() {
   panel.innerHTML = "";
   panel.appendChild(buildTrackedSection());
   panel.appendChild(buildAddSection());
+  panel.appendChild(buildNotificationsSection());
   panel.appendChild(buildSupportSection());
+}
+
+function buildNotificationsSection() {
+  const NOTIFY_OPTIONS = [
+    { value: -1, label: "Off" },
+    { value:  0, label: "At kickoff" },
+    { value:  1, label: "1 minute before" },
+    { value:  5, label: "5 minutes before" },
+    { value: 10, label: "10 minutes before" },
+    { value: 15, label: "15 minutes before" },
+    { value: 30, label: "30 minutes before" },
+    { value: 60, label: "1 hour before" },
+  ];
+
+  const section = document.createElement("div");
+  section.className = "settings-section";
+
+  const label = document.createElement("div");
+  label.className = "settings-label";
+  label.textContent = "Notifications";
+  section.appendChild(label);
+
+  const row = document.createElement("div");
+  row.className = "settings-notify-row";
+
+  const desc = document.createElement("span");
+  desc.className = "settings-notify-label";
+  desc.textContent = "Notify me before kickoff";
+  row.appendChild(desc);
+
+  const select = document.createElement("select");
+  select.className = "settings-select settings-select--inline";
+  for (const opt of NOTIFY_OPTIONS) {
+    const el = document.createElement("option");
+    el.value = opt.value;
+    el.textContent = opt.label;
+    select.appendChild(el);
+  }
+
+  chrome.storage.local.get("notifyMinutesBefore", (data) => {
+    select.value = typeof data.notifyMinutesBefore === "number"
+      ? data.notifyMinutesBefore
+      : 15;
+  });
+
+  select.addEventListener("change", () => {
+    saveNotifyBefore(Number(select.value));
+  });
+
+  row.appendChild(select);
+  section.appendChild(row);
+  return section;
 }
 
 function buildSupportSection() {

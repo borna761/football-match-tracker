@@ -73,21 +73,89 @@ async function updateBadge() {
   chrome.action.setTitle({ title });
 }
 
+// ── Notifications ─────────────────────────────────────────────────────────────
+async function checkNotifications() {
+  const data = await chrome.storage.local.get([
+    "matchesCache", "trackedTeamIds", "enabledTeams",
+    "notifyMinutesBefore", "notifiedMatchIds",
+  ]);
+
+  const notifyBefore = typeof data.notifyMinutesBefore === "number"
+    ? data.notifyMinutesBefore
+    : 15;
+  if (notifyBefore === -1) return;
+
+  const trackedIds = new Set(data.trackedTeamIds ?? []);
+  if (trackedIds.size === 0 || !data.matchesCache) return;
+
+  const enabledIds = new Set(
+    Array.isArray(data.enabledTeams) ? data.enabledTeams : [...trackedIds]
+  );
+
+  const now = Date.now();
+  const cutoff = now - 24 * 60 * 60 * 1000;
+
+  // Purge notification records older than 24 hours
+  const notified = {};
+  for (const [id, ts] of Object.entries(data.notifiedMatchIds ?? {})) {
+    if (ts > cutoff) notified[id] = ts;
+  }
+
+  let changed = Object.keys(notified).length !== Object.keys(data.notifiedMatchIds ?? {}).length;
+
+  for (const match of (data.matchesCache.matches ?? [])) {
+    if (match.status !== "TIMED" && match.status !== "SCHEDULED") continue;
+    if (!isVisible(match, trackedIds, enabledIds)) continue;
+
+    const matchId = String(match.id);
+    if (notified[matchId]) continue;
+
+    const minsUntil = (new Date(match.utcDate).getTime() - now) / 60_000;
+    if (minsUntil > notifyBefore || minsUntil < -2) continue;
+
+    const home = match.homeTeam.shortName || match.homeTeam.name;
+    const away = match.awayTeam.shortName || match.awayTeam.name;
+    const timeStr = formatMatchTime(match.utcDate);
+
+    const title = notifyBefore === 0
+      ? "Match starting now"
+      : `Match in ${notifyBefore} min`;
+
+    chrome.notifications.create(`match-${matchId}`, {
+      type: "basic",
+      iconUrl: "icons/icon48.png",
+      title,
+      message: `${home} vs ${away} · ${timeStr}`,
+    });
+
+    notified[matchId] = now;
+    changed = true;
+  }
+
+  if (changed) chrome.storage.local.set({ notifiedMatchIds: notified });
+}
+
 // Update badge when the browser starts
-chrome.runtime.onStartup.addListener(updateBadge);
+chrome.runtime.onStartup.addListener(() => { updateBadge(); checkNotifications(); });
 
 // Update badge on first install / extension reload
-chrome.runtime.onInstalled.addListener(updateBadge);
+chrome.runtime.onInstalled.addListener(() => { updateBadge(); checkNotifications(); });
 
-// Update badge every hour so it stays current as the day rolls over
-chrome.alarms.create("updateBadge", { periodInMinutes: 60 });
+// Badge: every hour. Notifications: every minute.
+chrome.alarms.create("updateBadge",        { periodInMinutes: 60 });
+chrome.alarms.create("checkNotifications", { periodInMinutes:  1 });
 chrome.alarms.onAlarm.addListener((alarm) => {
-  if (alarm.name === "updateBadge") updateBadge();
+  if (alarm.name === "updateBadge")        updateBadge();
+  if (alarm.name === "checkNotifications") checkNotifications();
 });
 
-// Update badge immediately whenever the popup writes new match or team data
+// Update badge immediately whenever the popup writes new match or team data.
+// Also re-check notifications when the preference changes.
 chrome.storage.onChanged.addListener((changes) => {
   if (changes.matchesCache || changes.trackedTeamIds || changes.enabledTeams) {
     updateBadge();
+  }
+  if (changes.matchesCache || changes.notifyMinutesBefore) {
+    checkNotifications();
   }
 });

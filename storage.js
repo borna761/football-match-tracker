@@ -114,3 +114,8 @@ function loadCompCache(code) {
 function saveCompCache(code, teams) {
   chrome.storage.local.set({ [`compTeams_${code}`]: { teams, timestamp: Date.now() } });
 }
+
+// ── Notification preference ───────────────────────────────────────────────────
+function saveNotifyBefore(minutes) {
+  chrome.storage.local.set({ notifyMinutesBefore: minutes });
+}
