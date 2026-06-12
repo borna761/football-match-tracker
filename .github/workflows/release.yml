@@ -1,0 +1,28 @@
+name: Release
+
+on:
+  release:
+    types: [created]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build extension zip
+        run: |
+          zip -j football-match-tracker.zip \
+            manifest.json \
+            popup.html popup.js popup.css \
+            background.js storage.js api.js \
+            settings.js fotmob.js utils.js \
+            config.example.js
+          zip football-match-tracker.zip \
+            icons/icon16.png icons/icon32.png icons/icon48.png icons/icon128.png \
+            icons/bmc-button.png
+
+      - name: Attach zip to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: football-match-tracker.zip
