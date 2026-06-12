@@ -15,6 +15,7 @@ A Chrome extension that shows upcoming matches for your favorite football teams,
 - Follows system dark/light mode
 - Badge on the toolbar icon shows today's match count
 - Tooltip shows today's fixtures or the next upcoming match
+- Kickoff notifications — configurable lead time (off / at kickoff / 1–60 min)
 - Caches results for 1 hour to stay within API rate limits
 
 ## Setup
