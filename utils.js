@@ -29,7 +29,23 @@ function dateKey(dateStr) {
   return new Date(dateStr).toDateString();
 }
 
+// ── Match visibility ──────────────────────────────────────────────────────────
+// Shared by the popup (filterMatches) and the background worker (badge/tooltip/
+// notifications) so the two can never disagree about which matches count.
+
+// Statuses for matches that won't be played as listed and should never show.
+const EXCLUDED_STATUSES = new Set(["POSTPONED", "CANCELLED", "SUSPENDED"]);
+
+// A match is visible if it isn't excluded and at least one of its teams is both
+// tracked and enabled.
+function isVisible(m, trackedIds, enabledIds) {
+  if (EXCLUDED_STATUSES.has(m.status)) return false;
+  const homeOn = trackedIds.has(m.homeTeam.id) && enabledIds.has(m.homeTeam.id);
+  const awayOn = trackedIds.has(m.awayTeam.id) && enabledIds.has(m.awayTeam.id);
+  return homeOn || awayOn;
+}
+
 // CommonJS export for Jest — not executed in the browser extension context
 if (typeof module !== "undefined") {
-  module.exports = { isoDate, localIsoDate, formatTime, formatDateLabel, dateKey };
+  module.exports = { isoDate, localIsoDate, formatTime, formatDateLabel, dateKey, EXCLUDED_STATUSES, isVisible };
 }

@@ -22,11 +22,11 @@ async function fetchMatches(team) {
   return { matches: json.matches || [], remaining, resetSecs };
 }
 
-async function fetchAllMatches() {
+async function fetchAllMatches(teams) {
   const allMatches = [];
   const seen = new Set();
 
-  for (const team of TEAMS) {
+  for (const team of teams) {
     try {
       const { matches, remaining, resetSecs } = await fetchMatches(team);
       for (const match of matches) {
@@ -62,9 +62,9 @@ async function fetchTeamInfo(id) {
   return { id, name: json.name, shortName: json.shortName, crest: json.crest, national };
 }
 
-async function fetchAllTeams() {
+async function fetchAllTeams(teamIds) {
   const results = [];
-  for (const id of TEAM_IDS) {
+  for (const id of teamIds) {
     try {
       results.push(await fetchTeamInfo(id));
     } catch (err) {
