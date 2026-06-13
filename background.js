@@ -154,12 +154,22 @@ async function checkNotifications() {
 }
 
 // Update badge when the browser starts
-chrome.runtime.onStartup.addListener(() => { updateBadge(); checkNotifications(); });
+chrome.runtime.onStartup.addListener(() => {
+  // Create alarms here (and in onInstalled) rather than at the top level so
+  // they aren't recreated — and their countdown reset — on every service
+  // worker wake-up.
+  chrome.alarms.create("updateBadge",        { periodInMinutes: 60 });
+  chrome.alarms.create("checkNotifications", { periodInMinutes:  1 });
+  updateBadge();
+  checkNotifications();
+});
 
-// Update badge on first install / extension reload.
+// First install / extension reload.
 // Also seed the default notification preference so background.js and
 // settings.js both read from storage rather than separate hardcoded fallbacks.
 chrome.runtime.onInstalled.addListener(() => {
+  chrome.alarms.create("updateBadge",        { periodInMinutes: 60 });
+  chrome.alarms.create("checkNotifications", { periodInMinutes:  1 });
   chrome.storage.local.get("notifyMinutesBefore", (data) => {
     if (typeof data.notifyMinutesBefore !== "number") {
       chrome.storage.local.set({ notifyMinutesBefore: 15 });
@@ -169,12 +179,11 @@ chrome.runtime.onInstalled.addListener(() => {
   checkNotifications();
 });
 
-// Badge: every hour. Notifications: every minute.
-chrome.alarms.create("updateBadge",        { periodInMinutes: 60 });
-chrome.alarms.create("checkNotifications", { periodInMinutes:  1 });
 chrome.alarms.onAlarm.addListener((alarm) => {
-  if (alarm.name === "updateBadge")        updateBadge();
-  if (alarm.name === "checkNotifications") checkNotifications();
+  if (alarm.name === "updateBadge") updateBadge();
+  // Piggyback badge refresh on the 1-minute tick so it stays current
+  // across midnight without needing a separate scheduled alarm.
+  if (alarm.name === "checkNotifications") { checkNotifications(); updateBadge(); }
 });
 
 // Update badge immediately whenever the popup writes new match or team data.
