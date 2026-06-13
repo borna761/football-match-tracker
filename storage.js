@@ -16,7 +16,13 @@ const CACHE_TTL_MS      =      60 * 60 * 1000; // 1 hour
 const TEAM_INFO_TTL_MS  =  7 * 24 * 60 * 60 * 1000; // 7 days
 const COMP_CACHE_TTL_MS =  7 * 24 * 60 * 60 * 1000; // 7 days
 
-// ── Bulk load on startup ──────────────────────────────────────────────────────
+// ── Popup-only state functions ────────────────────────────────────────────────
+// loadAllState/saveTrackedIds/saveEnabledTeams read and write the popup globals
+// (TEAM_IDS, TRACKED_IDS, enabledTeamIds). They are NOT safe to call from the
+// background service worker, which imports this file but never defines those
+// globals — calling them there throws ReferenceError. The worker uses only the
+// parameterized cache helpers below (loadCache/saveCache/loadTeams/saveTeams).
+
 // Load all persisted state in a single storage read and populate globals.
 // Returns the raw matchesCache entry (may be stale) for SWR use.
 function loadAllState() {

@@ -8,18 +8,8 @@
 // popup — imported here so there is a single implementation of each.
 importScripts("utils.js", "config.js", "storage.js", "api.js");
 
-const EXCLUDED_STATUSES = new Set(["POSTPONED", "CANCELLED", "SUSPENDED"]);
-
-function isVisible(m, trackedIds, enabledIds) {
-  if (EXCLUDED_STATUSES.has(m.status)) return false;
-  const homeOn = trackedIds.has(m.homeTeam.id) && enabledIds.has(m.homeTeam.id);
-  const awayOn = trackedIds.has(m.awayTeam.id) && enabledIds.has(m.awayTeam.id);
-  return homeOn || awayOn;
-}
-
-function formatMatchTime(utcDate) {
-  return new Date(utcDate).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
-}
+// EXCLUDED_STATUSES, isVisible, localIsoDate, isoDate, and formatTime all come
+// from utils.js (imported above) — shared verbatim with the popup.
 
 function formatMatchDay(utcDate) {
   return new Date(utcDate).toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" });
@@ -62,13 +52,13 @@ async function updateBadge() {
     const lines = todayMatches.map((m) => {
       const home = m.homeTeam.shortName || m.homeTeam.name;
       const away = m.awayTeam.shortName || m.awayTeam.name;
-      return `${formatMatchTime(m.utcDate)}  ${home} vs ${away}`;
+      return `${formatTime(m.utcDate)}  ${home} vs ${away}`;
     });
     title = lines.join("\n");
   } else if (nextMatch) {
     const home = nextMatch.homeTeam.shortName || nextMatch.homeTeam.name;
     const away = nextMatch.awayTeam.shortName || nextMatch.awayTeam.name;
-    title = `Next: ${home} vs ${away}\n${formatMatchDay(nextMatch.utcDate)} · ${formatMatchTime(nextMatch.utcDate)}`;
+    title = `Next: ${home} vs ${away}\n${formatMatchDay(nextMatch.utcDate)} · ${formatTime(nextMatch.utcDate)}`;
   }
   chrome.action.setTitle({ title });
 }
@@ -119,7 +109,7 @@ async function checkNotifications() {
 
     const home = match.homeTeam.shortName || match.homeTeam.name;
     const away = match.awayTeam.shortName || match.awayTeam.name;
-    const timeStr = formatMatchTime(match.utcDate);
+    const timeStr = formatTime(match.utcDate);
 
     const title = notifyBefore === 0
       ? "Match starting now"
@@ -158,12 +148,14 @@ async function checkNotifications() {
 // stale, so the badge/notifications work without the popup ever being opened.
 // Only fetches when stale to respect the 10 req/min API limit and avoid racing
 // the popup's own fetch.
+// Returns true if it wrote a fresh cache, false otherwise (no teams, cache
+// still fresh, empty fetch, or the tracked set changed mid-fetch).
 async function refreshMatches() {
   const { trackedTeamIds } = await chrome.storage.local.get("trackedTeamIds");
   const teamIds = Array.isArray(trackedTeamIds) ? trackedTeamIds : [];
-  if (teamIds.length === 0) return;
+  if (teamIds.length === 0) return false;
 
-  if (await loadCache(teamIds)) return; // cache is present and fresh
+  if (await loadCache(teamIds)) return false; // cache is present and fresh
 
   let teams = await loadTeams(teamIds);
   if (!teams) {
@@ -172,32 +164,49 @@ async function refreshMatches() {
   }
   const matches = await fetchAllMatches(teams);
   // Don't overwrite a good cache with an empty result from a rate-limited fetch.
-  if (matches.length > 0) saveCache(matches, teamIds);
+  if (matches.length === 0) return false;
+
+  // The tracked set may have changed (popup added/removed a team) while we were
+  // fetching. Don't clobber the popup's fresh cache with one signed for the old
+  // set — bail and let the next cycle (or the popup) handle the new set.
+  const { trackedTeamIds: current } = await chrome.storage.local.get("trackedTeamIds");
+  if ((Array.isArray(current) ? current : []).join(",") !== teamIds.join(",")) return false;
+
+  saveCache(matches, teamIds);
+  return true; // wrote a new cache
 }
 
 // Refresh data, then update the badge/tooltip and fire any due notifications.
-// (saveCache also triggers storage.onChanged, but we update explicitly so the
-// badge is correct even when the cache was already fresh and nothing changed.)
 async function refreshAndUpdate() {
+  let wrote = false;
   try {
-    await refreshMatches();
+    wrote = await refreshMatches();
   } catch (err) {
     console.error("refreshMatches failed:", err);
   }
-  updateBadge();
-  checkNotifications();
+  // When we wrote a new cache, the storage.onChanged listener already runs
+  // updateBadge + checkNotifications — so only do it here when nothing was
+  // written (cache was fresh), to avoid a redundant double pass.
+  if (!wrote) {
+    updateBadge();
+    checkNotifications();
+  }
+}
+
+// Register the periodic alarms. Called from onStartup and onInstalled — not at
+// the top level — so the countdown isn't reset on every service-worker wake-up.
+function ensureAlarms() {
+  // Fetch fresh match data every 6 hours. Fixtures change slowly and the
+  // 1-minute tick keeps the badge current from cache (incl. midnight), so this
+  // stays well clear of the API rate limit. Trade-off: if the popup is never
+  // opened, cached data can lag reality by up to ~6 hours.
+  chrome.alarms.create("refreshMatches",     { periodInMinutes: 360 });
+  chrome.alarms.create("checkNotifications", { periodInMinutes:   1 });
 }
 
 // Update badge when the browser starts
 chrome.runtime.onStartup.addListener(() => {
-  // Create alarms here (and in onInstalled) rather than at the top level so
-  // they aren't recreated — and their countdown reset — on every service
-  // worker wake-up.
-  // Fetch fresh match data every 6 hours — fixtures change slowly, and the
-  // 1-minute tick already keeps the badge current from cache (incl. midnight).
-  // A longer interval keeps well clear of the API rate limit.
-  chrome.alarms.create("refreshMatches",     { periodInMinutes: 360 });
-  chrome.alarms.create("checkNotifications", { periodInMinutes:   1 });
+  ensureAlarms();
   refreshAndUpdate();
 });
 
@@ -207,11 +216,7 @@ chrome.runtime.onStartup.addListener(() => {
 chrome.runtime.onInstalled.addListener(() => {
   // Clear the obsolete hourly alarm from versions ≤1.7 (renamed to refreshMatches).
   chrome.alarms.clear("updateBadge");
-  // Fetch fresh match data every 6 hours — fixtures change slowly, and the
-  // 1-minute tick already keeps the badge current from cache (incl. midnight).
-  // A longer interval keeps well clear of the API rate limit.
-  chrome.alarms.create("refreshMatches",     { periodInMinutes: 360 });
-  chrome.alarms.create("checkNotifications", { periodInMinutes:   1 });
+  ensureAlarms();
   chrome.storage.local.get("notifyMinutesBefore", (data) => {
     if (typeof data.notifyMinutesBefore !== "number") {
       chrome.storage.local.set({ notifyMinutesBefore: 15 });

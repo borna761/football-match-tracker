@@ -4,7 +4,7 @@ let TEAMS    = [];
 let TRACKED_IDS    = new Set();
 let enabledTeamIds = new Set();
 
-const EXCLUDED_STATUSES = new Set(["POSTPONED", "CANCELLED", "SUSPENDED"]);
+// EXCLUDED_STATUSES and isVisible come from utils.js (loaded before this file).
 
 // ── Match cache patching ──────────────────────────────────────────────────────
 // Read the raw cache from storage, bypassing the fingerprint check, so we can
@@ -181,16 +181,13 @@ function renderMatch(match, fotmobData) {
   return row;
 }
 
-// Pure function — exported for testing
+// Pure function — exported for testing. Extends the shared isVisible() check
+// with a popup-only rule: finished matches only show on the day they were played.
 function filterMatches(matches, todayStr, trackedIds, enabledIds) {
   return matches.filter((m) => {
-    if (EXCLUDED_STATUSES.has(m.status)) return false;
-    if (m.status === "FINISHED") {
-      if (localIsoDate(new Date(m.utcDate)) !== todayStr) return false;
-    }
-    const homeOn = trackedIds.has(m.homeTeam.id) && enabledIds.has(m.homeTeam.id);
-    const awayOn = trackedIds.has(m.awayTeam.id) && enabledIds.has(m.awayTeam.id);
-    return homeOn || awayOn;
+    if (!isVisible(m, trackedIds, enabledIds)) return false;
+    if (m.status === "FINISHED" && localIsoDate(new Date(m.utcDate)) !== todayStr) return false;
+    return true;
   });
 }
 
