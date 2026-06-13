@@ -6,8 +6,11 @@ const APP_VERSION = (typeof chrome !== "undefined" && chrome.runtime)
   ? chrome.runtime.getManifest().version
   : "0";
 
-function teamsFingerprint()   { return `t:${APP_VERSION}:${TEAM_IDS.join(",")}`; }
-function matchesFingerprint() { return TEAM_IDS.join(","); }
+// Fingerprints take the team-ID list explicitly so these functions are pure
+// and usable from both the popup (which holds TEAM_IDS as a global) and the
+// background service worker (which reads the list from storage).
+function teamsFingerprint(teamIds)   { return `t:${APP_VERSION}:${teamIds.join(",")}`; }
+function matchesFingerprint(teamIds) { return teamIds.join(","); }
 
 const CACHE_TTL_MS      =      60 * 60 * 1000; // 1 hour
 const TEAM_INFO_TTL_MS  =  7 * 24 * 60 * 60 * 1000; // 7 days
@@ -36,7 +39,7 @@ function loadAllState() {
         const tc = data.teamsCache;
         const freshTeams =
           tc &&
-          tc.fingerprint === teamsFingerprint() &&
+          tc.fingerprint === teamsFingerprint(TEAM_IDS) &&
           Date.now() - tc.timestamp <= TEAM_INFO_TTL_MS
             ? tc.teams
             : null;
@@ -44,7 +47,7 @@ function loadAllState() {
         // Match cache (returned raw so the caller can decide stale-while-revalidate)
         const mc = data.matchesCache;
         const matchCache =
-          mc && mc.fingerprint === matchesFingerprint() ? mc : null;
+          mc && mc.fingerprint === matchesFingerprint(TEAM_IDS) ? mc : null;
 
         resolve({ freshTeams, matchCache });
       }
@@ -63,39 +66,39 @@ function saveEnabledTeams() {
 }
 
 // ── Match cache ───────────────────────────────────────────────────────────────
-function loadCache() {
+function loadCache(teamIds) {
   return new Promise((resolve) => {
     chrome.storage.local.get("matchesCache", (data) => {
       const cache = data.matchesCache;
       if (!cache) return resolve(null);
-      if (cache.fingerprint !== matchesFingerprint()) return resolve(null);
+      if (cache.fingerprint !== matchesFingerprint(teamIds)) return resolve(null);
       resolve(Date.now() - cache.timestamp < CACHE_TTL_MS ? cache : null);
     });
   });
 }
 
-function saveCache(matches) {
-  const cache = { matches, timestamp: Date.now(), fingerprint: matchesFingerprint() };
+function saveCache(matches, teamIds) {
+  const cache = { matches, timestamp: Date.now(), fingerprint: matchesFingerprint(teamIds) };
   chrome.storage.local.set({ matchesCache: cache });
   return cache;
 }
 
 // ── Team info cache ───────────────────────────────────────────────────────────
-function loadTeams() {
+function loadTeams(teamIds) {
   return new Promise((resolve) => {
     chrome.storage.local.get("teamsCache", (data) => {
       const cache = data.teamsCache;
       if (!cache) return resolve(null);
-      if (cache.fingerprint !== teamsFingerprint()) return resolve(null);
+      if (cache.fingerprint !== teamsFingerprint(teamIds)) return resolve(null);
       if (Date.now() - cache.timestamp > TEAM_INFO_TTL_MS) return resolve(null);
       resolve(cache.teams);
     });
   });
 }
 
-function saveTeams(teams) {
+function saveTeams(teams, teamIds) {
   chrome.storage.local.set({
-    teamsCache: { teams, timestamp: Date.now(), fingerprint: teamsFingerprint() },
+    teamsCache: { teams, timestamp: Date.now(), fingerprint: teamsFingerprint(teamIds) },
   });
 }
 

@@ -1,14 +1,14 @@
-// Background service worker — keeps the badge count current without
-// requiring the popup to be open.
+// Background service worker — keeps the badge, tooltip, and notifications
+// current without requiring the popup to be open. It can fetch match data
+// independently via the shared data layer below, so the badge works even on a
+// cold browser start where the popup has never been opened.
+//
+// localIsoDate/isoDate (utils.js), API_KEY (config.js), the cache helpers
+// (storage.js), and the fetch helpers (api.js) are shared verbatim with the
+// popup — imported here so there is a single implementation of each.
+importScripts("utils.js", "config.js", "storage.js", "api.js");
 
 const EXCLUDED_STATUSES = new Set(["POSTPONED", "CANCELLED", "SUSPENDED"]);
-
-function localIsoDate(d) {
-  const y  = d.getFullYear();
-  const m  = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
-}
 
 function isVisible(m, trackedIds, enabledIds) {
   if (EXCLUDED_STATUSES.has(m.status)) return false;
@@ -153,6 +153,41 @@ async function checkNotifications() {
   }
 }
 
+// ── Independent match refresh ─────────────────────────────────────────────────
+// Fetch fresh match data directly from the API when the cache is missing or
+// stale, so the badge/notifications work without the popup ever being opened.
+// Only fetches when stale to respect the 10 req/min API limit and avoid racing
+// the popup's own fetch.
+async function refreshMatches() {
+  const { trackedTeamIds } = await chrome.storage.local.get("trackedTeamIds");
+  const teamIds = Array.isArray(trackedTeamIds) ? trackedTeamIds : [];
+  if (teamIds.length === 0) return;
+
+  if (await loadCache(teamIds)) return; // cache is present and fresh
+
+  let teams = await loadTeams(teamIds);
+  if (!teams) {
+    teams = await fetchAllTeams(teamIds);
+    saveTeams(teams, teamIds);
+  }
+  const matches = await fetchAllMatches(teams);
+  // Don't overwrite a good cache with an empty result from a rate-limited fetch.
+  if (matches.length > 0) saveCache(matches, teamIds);
+}
+
+// Refresh data, then update the badge/tooltip and fire any due notifications.
+// (saveCache also triggers storage.onChanged, but we update explicitly so the
+// badge is correct even when the cache was already fresh and nothing changed.)
+async function refreshAndUpdate() {
+  try {
+    await refreshMatches();
+  } catch (err) {
+    console.error("refreshMatches failed:", err);
+  }
+  updateBadge();
+  checkNotifications();
+}
+
 // Update badge when the browser starts
 chrome.runtime.onStartup.addListener(() => {
   // Create alarms here (and in onInstalled) rather than at the top level so
@@ -160,8 +195,7 @@ chrome.runtime.onStartup.addListener(() => {
   // worker wake-up.
   chrome.alarms.create("updateBadge",        { periodInMinutes: 60 });
   chrome.alarms.create("checkNotifications", { periodInMinutes:  1 });
-  updateBadge();
-  checkNotifications();
+  refreshAndUpdate();
 });
 
 // First install / extension reload.
@@ -175,14 +209,14 @@ chrome.runtime.onInstalled.addListener(() => {
       chrome.storage.local.set({ notifyMinutesBefore: 15 });
     }
   });
-  updateBadge();
-  checkNotifications();
+  refreshAndUpdate();
 });
 
 chrome.alarms.onAlarm.addListener((alarm) => {
-  if (alarm.name === "updateBadge") updateBadge();
-  // Piggyback badge refresh on the 1-minute tick so it stays current
-  // across midnight without needing a separate scheduled alarm.
+  // Hourly: refresh the cache from the API, then update badge/notifications.
+  if (alarm.name === "updateBadge") refreshAndUpdate();
+  // Every minute: fire due notifications and keep the badge current across
+  // midnight. No fetch here — that would blow the API rate limit.
   if (alarm.name === "checkNotifications") { checkNotifications(); updateBadge(); }
 });
 

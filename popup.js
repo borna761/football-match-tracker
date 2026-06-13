@@ -35,7 +35,7 @@ async function addTeam(id, knownInfo = null) {
 
   saveTrackedIds();
   saveEnabledTeams();
-  saveTeams(TEAMS);
+  saveTeams(TEAMS, TEAM_IDS);
 
   // Fetch only this team's matches and merge into the existing cache so we
   // don't need to re-fetch every other team again.
@@ -49,7 +49,7 @@ async function addTeam(id, knownInfo = null) {
         if (!seen.has(m.id)) merged.push(m);
       }
       merged.sort((a, b) => new Date(a.utcDate) - new Date(b.utcDate));
-      saveCache(merged); // re-signs with updated fingerprint (new TEAM_IDS)
+      saveCache(merged, TEAM_IDS); // re-signs with updated fingerprint (new TEAM_IDS)
     } catch {
       // Fetch failed — clear so load() starts fresh on next open
       chrome.storage.local.remove("matchesCache");
@@ -69,13 +69,13 @@ function removeTeam(id) {
 
   saveTrackedIds();
   saveEnabledTeams();
-  saveTeams(TEAMS);
+  saveTeams(TEAMS, TEAM_IDS);
 
   // No API call needed — re-save the existing cache with the updated
   // fingerprint so it stays valid. filterMatches will exclude the removed
   // team's matches since they're no longer in TRACKED_IDS.
   readRawMatchCache().then((existing) => {
-    if (existing) saveCache(existing.matches);
+    if (existing) saveCache(existing.matches, TEAM_IDS);
   });
 
   renderCrests();
@@ -349,9 +349,9 @@ async function scheduleLiveRefresh(cachedMatches) {
 async function load() {
   clearTimeout(_liveTimer);
   try {
-    let cache = await loadCache();
+    let cache = await loadCache(TEAM_IDS);
     if (!cache) {
-      const matches = await fetchAllMatches();
+      const matches = await fetchAllMatches(TEAMS);
       if (matches.length === 0 && TEAMS.length > 0) {
         const container = document.getElementById("matches-container");
         container.innerHTML = "";
@@ -365,7 +365,7 @@ async function load() {
         container.appendChild(el);
         return;
       }
-      cache = saveCache(matches);
+      cache = saveCache(matches, TEAM_IDS);
     }
     _lastMatches = cache.matches;
     const hasLive = await renderMatches(cache.matches);
@@ -390,8 +390,8 @@ if (typeof document !== "undefined") {
       TEAMS.push(...freshTeams);
     } else {
       setLoadingText("Fetching team data…");
-      const fetched = await fetchAllTeams();
-      saveTeams(fetched);
+      const fetched = await fetchAllTeams(TEAM_IDS);
+      saveTeams(fetched, TEAM_IDS);
       TEAMS.push(...fetched);
     }
     renderCrests();
@@ -407,9 +407,9 @@ if (typeof document !== "undefined") {
 
       // Re-fetch in background if stale (don't show spinner)
       if (Date.now() - matchCache.timestamp >= CACHE_TTL_MS) {
-        const fresh = await fetchAllMatches();
+        const fresh = await fetchAllMatches(TEAMS);
         if (fresh.length > 0 || TEAMS.length === 0) {
-          const cache = saveCache(fresh);
+          const cache = saveCache(fresh, TEAM_IDS);
           _lastMatches = cache.matches;
           const stillLive = await renderMatches(cache.matches);
           if (stillLive) scheduleLiveRefresh(cache.matches);
