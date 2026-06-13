@@ -193,8 +193,11 @@ chrome.runtime.onStartup.addListener(() => {
   // Create alarms here (and in onInstalled) rather than at the top level so
   // they aren't recreated — and their countdown reset — on every service
   // worker wake-up.
-  chrome.alarms.create("updateBadge",        { periodInMinutes: 60 });
-  chrome.alarms.create("checkNotifications", { periodInMinutes:  1 });
+  // Fetch fresh match data every 6 hours — fixtures change slowly, and the
+  // 1-minute tick already keeps the badge current from cache (incl. midnight).
+  // A longer interval keeps well clear of the API rate limit.
+  chrome.alarms.create("refreshMatches",     { periodInMinutes: 360 });
+  chrome.alarms.create("checkNotifications", { periodInMinutes:   1 });
   refreshAndUpdate();
 });
 
@@ -202,8 +205,13 @@ chrome.runtime.onStartup.addListener(() => {
 // Also seed the default notification preference so background.js and
 // settings.js both read from storage rather than separate hardcoded fallbacks.
 chrome.runtime.onInstalled.addListener(() => {
-  chrome.alarms.create("updateBadge",        { periodInMinutes: 60 });
-  chrome.alarms.create("checkNotifications", { periodInMinutes:  1 });
+  // Clear the obsolete hourly alarm from versions ≤1.7 (renamed to refreshMatches).
+  chrome.alarms.clear("updateBadge");
+  // Fetch fresh match data every 6 hours — fixtures change slowly, and the
+  // 1-minute tick already keeps the badge current from cache (incl. midnight).
+  // A longer interval keeps well clear of the API rate limit.
+  chrome.alarms.create("refreshMatches",     { periodInMinutes: 360 });
+  chrome.alarms.create("checkNotifications", { periodInMinutes:   1 });
   chrome.storage.local.get("notifyMinutesBefore", (data) => {
     if (typeof data.notifyMinutesBefore !== "number") {
       chrome.storage.local.set({ notifyMinutesBefore: 15 });
@@ -213,8 +221,8 @@ chrome.runtime.onInstalled.addListener(() => {
 });
 
 chrome.alarms.onAlarm.addListener((alarm) => {
-  // Hourly: refresh the cache from the API, then update badge/notifications.
-  if (alarm.name === "updateBadge") refreshAndUpdate();
+  // Every 6 hours: refresh the cache from the API, then update badge/notifications.
+  if (alarm.name === "refreshMatches") refreshAndUpdate();
   // Every minute: fire due notifications and keep the badge current across
   // midnight. No fetch here — that would blow the API rate limit.
   if (alarm.name === "checkNotifications") { checkNotifications(); updateBadge(); }
