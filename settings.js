@@ -142,7 +142,7 @@ function buildTrackedSection() {
     empty.textContent = "No teams tracked yet";
     chips.appendChild(empty);
   } else {
-    [...TEAMS].sort((a, b) => a.name.localeCompare(b.name)).forEach((team) => {
+    [...TEAMS].sort((a, b) => (a.name ?? "").localeCompare(b.name ?? "")).forEach((team) => {
       chips.appendChild(makeChip(team));
     });
   }
@@ -281,7 +281,7 @@ function renderCompTeamRows(container, teams) {
     container.innerHTML = `<div class="settings-status">No teams found.</div>`;
     return;
   }
-  const sorted = [...teams].sort((a, b) => a.name.localeCompare(b.name));
+  const sorted = [...teams].sort((a, b) => (a.name ?? "").localeCompare(b.name ?? ""));
   for (const team of sorted) {
     const isTracked = TEAM_IDS.includes(team.id);
     const row = document.createElement("div");
@@ -315,7 +315,7 @@ function renderCompTeamRows(container, teams) {
       const chipsEl = document.querySelector(".tracked-chips");
       if (chipsEl) {
         chipsEl.innerHTML = "";
-        [...TEAMS].sort((a, b) => a.name.localeCompare(b.name)).forEach((t) => {
+        [...TEAMS].sort((a, b) => (a.name ?? "").localeCompare(b.name ?? "")).forEach((t) => {
           chipsEl.appendChild(makeChip(t));
         });
       }

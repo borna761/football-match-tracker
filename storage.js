@@ -12,7 +12,12 @@ const COMP_CACHE_TTL_MS =  7 * 24 * 60 * 60 * 1000; // 7 days
 // reuse records by id for currently-tracked teams and drop the rest.
 function salvageTeams(cachedTeams, teamIds) {
   const byId = new Map((cachedTeams || []).map((t) => [t.id, t]));
-  return teamIds.map((id) => byId.get(id) || { id, name: String(id), competitions: [] });
+  return teamIds.map((id) => {
+    const rec = byId.get(id);
+    // Always guarantee a name — older/placeholder records may lack one, and a
+    // missing name breaks name-sorting in the crest bar and settings panel.
+    return rec ? { ...rec, name: rec.name ?? String(id) } : { id, name: String(id), competitions: [] };
+  });
 }
 
 // ── Popup-only state functions ────────────────────────────────────────────────
