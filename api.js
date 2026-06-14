@@ -38,18 +38,20 @@ async function fetchCompMatches(code) {
   return { matches: json.matches || [], remaining, resetSecs };
 }
 
-// Returns true at most once per SWEEP_THROTTLE_MS, stamping the time it allows a
-// sweep — so the all-competitions fallback can't run on every refresh.
-function sweepDue() {
+// Whether the throttle window has elapsed since the last recorded sweep. This is
+// a read-only check — the caller stamps (markSwept) only AFTER a sweep that
+// actually reached the API, so a fully-failed sweep (rate limit/outage) retries
+// next refresh instead of being suppressed for the whole window.
+function sweepAllowed() {
   return new Promise((resolve) => {
     chrome.storage.local.get("lastCompSweep", (data) => {
-      if (data.lastCompSweep && Date.now() - data.lastCompSweep < SWEEP_THROTTLE_MS) {
-        return resolve(false);
-      }
-      chrome.storage.local.set({ lastCompSweep: Date.now() });
-      resolve(true);
+      resolve(!data.lastCompSweep || Date.now() - data.lastCompSweep >= SWEEP_THROTTLE_MS);
     });
   });
+}
+
+function markSwept() {
+  chrome.storage.local.set({ lastCompSweep: Date.now() });
 }
 
 // Fetch upcoming matches for the given teams. Queries the union of competitions
@@ -63,16 +65,19 @@ async function fetchAllMatches(teams) {
   // data carries the team's real competition, so the sweep self-corrects once
   // teamsFromMatches() records it. Throttled so a team that simply has no
   // fixtures (off-season) doesn't re-sweep all 11 competitions every refresh.
-  if (teams.some((t) => !(t.competitions && t.competitions.length)) && await sweepDue()) {
+  const swept = teams.some((t) => !(t.competitions && t.competitions.length)) && await sweepAllowed();
+  if (swept) {
     for (const c of FREE_COMP_CODES) codes.add(c);
   }
 
   const allMatches = [];
   const seen = new Set();
+  let anyOk = false;
 
   for (const code of codes) {
     try {
       const { matches, remaining, resetSecs } = await fetchCompMatches(code);
+      anyOk = true;
       for (const match of matches) {
         if (!trackedIds.has(match.homeTeam.id) && !trackedIds.has(match.awayTeam.id)) continue;
         if (seen.has(match.id)) continue;
@@ -88,6 +93,10 @@ async function fetchAllMatches(teams) {
       console.warn(`Skipping competition ${code}:`, err.message);
     }
   }
+
+  // Record the sweep only if at least one request reached the API; a fully
+  // failed sweep (rate limit/outage) should retry, not be suppressed 12h.
+  if (swept && anyOk) markSwept();
 
   allMatches.sort((a, b) => new Date(a.utcDate) - new Date(b.utcDate));
   return allMatches;
