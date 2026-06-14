@@ -47,18 +47,17 @@ async function updateBadge() {
   chrome.action.setBadgeBackgroundColor({ color: "#f97316" });
 
   // Tooltip
+  const label = (m) => {
+    const home = m.homeTeam.shortName || m.homeTeam.name;
+    const away = m.awayTeam.shortName || m.awayTeam.name;
+    const comp = m.competition?.name ? ` (${m.competition.name})` : "";
+    return `${home} vs ${away}${comp}`;
+  };
   let title = "Football Match Tracker";
   if (todayMatches.length > 0) {
-    const lines = todayMatches.map((m) => {
-      const home = m.homeTeam.shortName || m.homeTeam.name;
-      const away = m.awayTeam.shortName || m.awayTeam.name;
-      return `${formatTime(m.utcDate)}  ${home} vs ${away}`;
-    });
-    title = lines.join("\n");
+    title = todayMatches.map((m) => `${formatTime(m.utcDate)}  ${label(m)}`).join("\n");
   } else if (nextMatch) {
-    const home = nextMatch.homeTeam.shortName || nextMatch.homeTeam.name;
-    const away = nextMatch.awayTeam.shortName || nextMatch.awayTeam.name;
-    title = `Next: ${home} vs ${away}\n${formatMatchDay(nextMatch.utcDate)} · ${formatTime(nextMatch.utcDate)}`;
+    title = `Next: ${label(nextMatch)}\n${formatMatchDay(nextMatch.utcDate)} · ${formatTime(nextMatch.utcDate)}`;
   }
   chrome.action.setTitle({ title });
 }
