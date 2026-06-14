@@ -19,6 +19,12 @@ let _settingsOpen = false;
 let _teamAddedInSettings = false;
 let _compTeams = [];
 
+// Sort by the label actually shown in the row (shortName falls back to name),
+// so the displayed list reads alphabetically — e.g. "Leverkusen" sorts under L,
+// not B (Bayer 04 Leverkusen).
+const byDisplayName = (a, b) =>
+  (a.shortName || a.name || "").localeCompare(b.shortName || b.name || "");
+
 function openSettings() {
   _settingsOpen = true;
   _teamAddedInSettings = false;
@@ -142,7 +148,7 @@ function buildTrackedSection() {
     empty.textContent = "No teams tracked yet";
     chips.appendChild(empty);
   } else {
-    [...TEAMS].sort((a, b) => (a.name ?? "").localeCompare(b.name ?? "")).forEach((team) => {
+    [...TEAMS].sort(byDisplayName).forEach((team) => {
       chips.appendChild(makeChip(team));
     });
   }
@@ -281,7 +287,7 @@ function renderCompTeamRows(container, teams) {
     container.innerHTML = `<div class="settings-status">No teams found.</div>`;
     return;
   }
-  const sorted = [...teams].sort((a, b) => (a.name ?? "").localeCompare(b.name ?? ""));
+  const sorted = [...teams].sort(byDisplayName);
   for (const team of sorted) {
     const isTracked = TEAM_IDS.includes(team.id);
     const row = document.createElement("div");
@@ -315,7 +321,7 @@ function renderCompTeamRows(container, teams) {
       const chipsEl = document.querySelector(".tracked-chips");
       if (chipsEl) {
         chipsEl.innerHTML = "";
-        [...TEAMS].sort((a, b) => (a.name ?? "").localeCompare(b.name ?? "")).forEach((t) => {
+        [...TEAMS].sort(byDisplayName).forEach((t) => {
           chipsEl.appendChild(makeChip(t));
         });
       }
