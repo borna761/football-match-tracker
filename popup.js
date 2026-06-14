@@ -38,7 +38,7 @@ async function addTeam(id, knownInfo = null) {
 
   saveTrackedIds();
   saveEnabledTeams();
-  saveTeams(TEAMS, TEAM_IDS);
+  saveTeams(TEAMS);
 
   // Fetch only this team's matches and merge into the existing cache so we
   // don't need to re-fetch every other team again.
@@ -72,7 +72,7 @@ function removeTeam(id) {
 
   saveTrackedIds();
   saveEnabledTeams();
-  saveTeams(TEAMS, TEAM_IDS);
+  saveTeams(TEAMS);
 
   // No API call needed — re-save the existing cache with the updated
   // fingerprint so it stays valid. filterMatches will exclude the removed
@@ -280,9 +280,10 @@ async function renderMatches(matches) {
 function renderCrests() {
   const container = document.getElementById("team-crests");
   container.innerHTML = "";
+  const byName = (a, b) => (a.name ?? "").localeCompare(b.name ?? "");
   const sorted = [
-    ...TEAMS.filter((t) => !t.national).sort((a, b) => a.name.localeCompare(b.name)),
-    ...TEAMS.filter((t) =>  t.national).sort((a, b) => a.name.localeCompare(b.name)),
+    ...TEAMS.filter((t) => !t.national).sort(byName),
+    ...TEAMS.filter((t) =>  t.national).sort(byName),
   ];
   let dividedInserted = false;
   for (const team of sorted) {
@@ -318,7 +319,7 @@ function renderCrests() {
 // still show a real name once their matches load.
 function healTeams(matches) {
   TEAMS.splice(0, TEAMS.length, ...teamsFromMatches(TEAMS, matches));
-  saveTeams(TEAMS, TEAM_IDS);
+  saveTeams(TEAMS);
   renderCrests();
 }
 
@@ -395,14 +396,10 @@ if (typeof document !== "undefined") {
       else openSettings();
     });
 
-    // Use cached team records if present, else bare id records. We never call
-    // /v4/teams/{id} — it 403s for clubs in restricted competitions. Names and
-    // competitions are healed from match data below.
-    if (freshTeams) {
-      TEAMS.push(...freshTeams);
-    } else {
-      TEAMS.push(...TEAM_IDS.map((id) => ({ id, name: String(id), competitions: [] })));
-    }
+    // Durable team records (bare id placeholders for any we haven't seen yet).
+    // We never call /v4/teams/{id} — it 403s for clubs in restricted
+    // competitions; names/competitions are healed from match data below.
+    TEAMS.push(...freshTeams);
     renderCrests();
 
     // ── Stale-while-revalidate ──────────────────────────────────────────────

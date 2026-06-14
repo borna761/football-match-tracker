@@ -161,7 +161,7 @@ async function refreshMatches() {
   // call /v4/teams/{id} here — it 403s for clubs in restricted competitions.
   // Names and competitions are derived from match data below instead.
   let teams = await loadTeams(teamIds);
-  if (!teams) teams = teamIds.map((id) => ({ id, competitions: [] }));
+  if (!teams) teams = teamIds.map((id) => ({ id, name: String(id), competitions: [] }));
 
   const matches = await fetchAllMatches(teams);
   // Don't overwrite a good cache with an empty result from a rate-limited fetch.
@@ -175,7 +175,7 @@ async function refreshMatches() {
 
   // Heal team records (names/crests/competitions) from the match data so the
   // next refresh queries only the relevant competitions instead of sweeping.
-  saveTeams(teamsFromMatches(teams, matches), teamIds);
+  saveTeams(teamsFromMatches(teams, matches));
   saveCache(matches, teamIds);
   return true; // wrote a new cache
 }

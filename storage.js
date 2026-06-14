@@ -1,20 +1,19 @@
-// Team cache includes the manifest version so that releasing a new version
-// automatically re-fetches team metadata (name, crest, national flag).
-// Match cache only depends on which teams are tracked — match data format
-// doesn't change between releases, so version bumps don't bust it.
-const APP_VERSION = (typeof chrome !== "undefined" && chrome.runtime)
-  ? chrome.runtime.getManifest().version
-  : "0";
-
-// Fingerprints take the team-ID list explicitly so these functions are pure
-// and usable from both the popup (which holds TEAM_IDS as a global) and the
-// background service worker (which reads the list from storage).
-function teamsFingerprint(teamIds)   { return `t:${APP_VERSION}:${teamIds.join(",")}`; }
+// Match cache depends only on which teams are tracked.
 function matchesFingerprint(teamIds) { return teamIds.join(","); }
 
 const CACHE_TTL_MS      =      60 * 60 * 1000; // 1 hour
-const TEAM_INFO_TTL_MS  =  7 * 24 * 60 * 60 * 1000; // 7 days
 const COMP_CACHE_TTL_MS =  7 * 24 * 60 * 60 * 1000; // 7 days
+
+// Team records (name, crest, national flag, competitions) are durable display
+// state, not a refreshable cache: a club's /v4/teams/{id} endpoint 403s when it's
+// in a restricted competition, so a lost name can't always be re-fetched. We set
+// records when a team is added (from the competition browser) and enrich them
+// from match data — never discard them on a version bump or TTL. On load we
+// reuse records by id for currently-tracked teams and drop the rest.
+function salvageTeams(cachedTeams, teamIds) {
+  const byId = new Map((cachedTeams || []).map((t) => [t.id, t]));
+  return teamIds.map((id) => byId.get(id) || { id, name: String(id), competitions: [] });
+}
 
 // ── Popup-only state functions ────────────────────────────────────────────────
 // loadAllState/saveTrackedIds/saveEnabledTeams read and write the popup globals
@@ -41,14 +40,8 @@ function loadAllState() {
           enabledTeamIds = new Set(TEAM_IDS);
         }
 
-        // Teams metadata cache
-        const tc = data.teamsCache;
-        const freshTeams =
-          tc &&
-          tc.fingerprint === teamsFingerprint(TEAM_IDS) &&
-          Date.now() - tc.timestamp <= TEAM_INFO_TTL_MS
-            ? tc.teams
-            : null;
+        // Durable team records, reused by id (bare placeholder for any missing).
+        const freshTeams = salvageTeams(data.teamsCache?.teams, TEAM_IDS);
 
         // Match cache (returned raw so the caller can decide stale-while-revalidate)
         const mc = data.matchesCache;
@@ -89,23 +82,22 @@ function saveCache(matches, teamIds) {
   return cache;
 }
 
-// ── Team info cache ───────────────────────────────────────────────────────────
+// ── Team records (durable) ────────────────────────────────────────────────────
+// Reused by id and never discarded on version/TTL — see salvageTeams above.
+// Returns null only when nothing is cached yet, so the caller falls back to
+// bare records that match data then heals.
 function loadTeams(teamIds) {
   return new Promise((resolve) => {
     chrome.storage.local.get("teamsCache", (data) => {
-      const cache = data.teamsCache;
-      if (!cache) return resolve(null);
-      if (cache.fingerprint !== teamsFingerprint(teamIds)) return resolve(null);
-      if (Date.now() - cache.timestamp > TEAM_INFO_TTL_MS) return resolve(null);
-      resolve(cache.teams);
+      const teams = data.teamsCache?.teams;
+      if (!Array.isArray(teams)) return resolve(null);
+      resolve(salvageTeams(teams, teamIds));
     });
   });
 }
 
-function saveTeams(teams, teamIds) {
-  chrome.storage.local.set({
-    teamsCache: { teams, timestamp: Date.now(), fingerprint: teamsFingerprint(teamIds) },
-  });
+function saveTeams(teams) {
+  chrome.storage.local.set({ teamsCache: { teams, timestamp: Date.now() } });
 }
 
 // ── Competition teams cache ───────────────────────────────────────────────────
