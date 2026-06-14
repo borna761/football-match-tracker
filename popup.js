@@ -313,6 +313,15 @@ function renderCrests() {
   }
 }
 
+// Update team records (names, crests, competitions) from fetched match data and
+// re-render the crest bar. Lets clubs whose /v4/teams/{id} endpoint is 403'd
+// still show a real name once their matches load.
+function healTeams(matches) {
+  TEAMS.splice(0, TEAMS.length, ...teamsFromMatches(TEAMS, matches));
+  saveTeams(TEAMS, TEAM_IDS);
+  renderCrests();
+}
+
 function setLoadingText(msg) {
   const span = document.querySelector("#loading span");
   if (span) span.textContent = msg;
@@ -366,6 +375,7 @@ async function load() {
         return;
       }
       cache = saveCache(matches, TEAM_IDS);
+      healTeams(matches);
     }
     _lastMatches = cache.matches;
     const hasLive = await renderMatches(cache.matches);
@@ -385,14 +395,13 @@ if (typeof document !== "undefined") {
       else openSettings();
     });
 
-    // Fetch team metadata if cache is missing or stale
+    // Use cached team records if present, else bare id records. We never call
+    // /v4/teams/{id} — it 403s for clubs in restricted competitions. Names and
+    // competitions are healed from match data below.
     if (freshTeams) {
       TEAMS.push(...freshTeams);
     } else {
-      setLoadingText("Fetching team data…");
-      const fetched = await fetchAllTeams(TEAM_IDS);
-      saveTeams(fetched, TEAM_IDS);
-      TEAMS.push(...fetched);
+      TEAMS.push(...TEAM_IDS.map((id) => ({ id, name: String(id), competitions: [] })));
     }
     renderCrests();
 
@@ -401,6 +410,7 @@ if (typeof document !== "undefined") {
     // popup feels immediate. Then silently re-fetch in the background if the
     // cache is expired, and update the UI when the fresh data arrives.
     if (matchCache) {
+      healTeams(matchCache.matches); // fill in any placeholder names from cached data
       _lastMatches = matchCache.matches;
       const hasLive = await renderMatches(matchCache.matches);
       if (hasLive) scheduleLiveRefresh(matchCache.matches);
@@ -410,6 +420,7 @@ if (typeof document !== "undefined") {
         const fresh = await fetchAllMatches(TEAMS);
         if (fresh.length > 0 || TEAMS.length === 0) {
           const cache = saveCache(fresh, TEAM_IDS);
+          healTeams(fresh);
           _lastMatches = cache.matches;
           const stillLive = await renderMatches(cache.matches);
           if (stillLive) scheduleLiveRefresh(cache.matches);

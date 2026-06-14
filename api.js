@@ -6,6 +6,11 @@ const LOOKAHEAD_DAYS = 60;
 // National teams are identified by their runningCompetitions codes instead.
 const NATIONAL_COMP_CODES = new Set(["WC", "EC"]);
 
+// Free-tier competitions (mirrors the COMPETITIONS list in settings.js). Used as
+// a fallback sweep when a tracked team has no known competition yet — e.g. a club
+// whose /v4/teams/{id} record is 403'd because it's in a restricted competition.
+const FREE_COMP_CODES = ["PL", "PD", "BL1", "SA", "FL1", "CL", "WC", "EC", "ELC", "DED", "PPL"];
+
 // Fetch a single competition's matches in the lookahead window.
 // We fetch per competition rather than per team because the team-matches
 // endpoint returns 403 if a team has any fixture in a competition outside the
@@ -33,7 +38,14 @@ async function fetchCompMatches(code) {
 // tracked team. Competitions the key can't access (free-tier 403) are skipped.
 async function fetchAllMatches(teams) {
   const trackedIds = new Set(teams.map((t) => t.id));
-  const codes = [...new Set(teams.flatMap((t) => t.competitions || []))];
+  const codes = new Set(teams.flatMap((t) => t.competitions || []));
+  // If any team has no known competition (e.g. a club whose team-info endpoint
+  // is 403'd), sweep all free-tier competitions and filter by team id. Match
+  // data carries the team's real competition, so the sweep self-corrects on the
+  // next refresh once teamsFromMatches() records it.
+  if (teams.some((t) => !(t.competitions && t.competitions.length))) {
+    for (const c of FREE_COMP_CODES) codes.add(c);
+  }
 
   const allMatches = [];
   const seen = new Set();
@@ -61,6 +73,32 @@ async function fetchAllMatches(teams) {
   return allMatches;
 }
 
+// Derive up-to-date team records (name, shortName, crest, national flag, and the
+// competitions they actually play in) from fetched match data. This is how we
+// avoid the /v4/teams/{id} endpoint entirely — match objects carry each team's
+// metadata, so a club whose team-info endpoint is 403'd still gets a real name
+// and its competition recorded for the next, cheaper refresh. Teams with no
+// matches in range keep their existing record. Pure — exported for testing.
+function teamsFromMatches(teams, matches) {
+  return teams.map((t) => {
+    const mine = matches.filter((m) => m.homeTeam.id === t.id || m.awayTeam.id === t.id);
+    if (mine.length === 0) return t;
+    const sample = mine[0].homeTeam.id === t.id ? mine[0].homeTeam : mine[0].awayTeam;
+    const discovered = mine.map((m) => m.competition.code).filter(Boolean);
+    // Union with existing codes so a competition that simply has no fixtures in
+    // the current window (e.g. CL before the group stage) isn't dropped.
+    const competitions = [...new Set([...(t.competitions || []), ...discovered])];
+    return {
+      ...t,
+      name:      sample.name      ?? t.name,
+      shortName: sample.shortName ?? t.shortName,
+      crest:     sample.crest     ?? t.crest,
+      national:  competitions.some((c) => NATIONAL_COMP_CODES.has(c)),
+      competitions,
+    };
+  });
+}
+
 async function fetchTeamInfo(id) {
   const res = await fetch(`https://api.football-data.org/v4/teams/${id}`, {
     headers: { "X-Auth-Token": API_KEY },
@@ -78,21 +116,6 @@ async function fetchTeamInfo(id) {
   return { id, name: json.name, shortName: json.shortName, crest: json.crest, national, competitions };
 }
 
-async function fetchAllTeams(teamIds) {
-  const results = [];
-  for (const id of teamIds) {
-    try {
-      results.push(await fetchTeamInfo(id));
-    } catch (err) {
-      // Expected and handled: fall back to a placeholder so the team still
-      // appears; warn (not error) since this is recoverable.
-      console.warn(`Team ${id} info unavailable:`, err.message);
-      results.push({ id, name: String(id), shortName: String(id), crest: null, national: false, competitions: [] });
-    }
-  }
-  return results;
-}
-
 async function fetchCompTeams(code) {
   const res = await fetch(`https://api.football-data.org/v4/competitions/${code}/teams`, {
     headers: { "X-Auth-Token": API_KEY },
@@ -108,5 +131,13 @@ async function fetchCompTeams(code) {
     shortName: t.shortName,
     crest:     t.crest,
     national:  isNational,
+    // Record the competition the team was browsed from so its matches can be
+    // fetched without ever hitting the (often 403'd) /v4/teams/{id} endpoint.
+    competitions: [code],
   }));
+}
+
+// Pure helper exported for testing.
+if (typeof module !== "undefined") {
+  module.exports = { teamsFromMatches };
 }

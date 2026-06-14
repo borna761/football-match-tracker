@@ -157,11 +157,12 @@ async function refreshMatches() {
 
   if (await loadCache(teamIds)) return false; // cache is present and fresh
 
+  // Start from cached team records if present, else bare id records. We never
+  // call /v4/teams/{id} here — it 403s for clubs in restricted competitions.
+  // Names and competitions are derived from match data below instead.
   let teams = await loadTeams(teamIds);
-  if (!teams) {
-    teams = await fetchAllTeams(teamIds);
-    saveTeams(teams, teamIds);
-  }
+  if (!teams) teams = teamIds.map((id) => ({ id, competitions: [] }));
+
   const matches = await fetchAllMatches(teams);
   // Don't overwrite a good cache with an empty result from a rate-limited fetch.
   if (matches.length === 0) return false;
@@ -172,6 +173,9 @@ async function refreshMatches() {
   const { trackedTeamIds: current } = await chrome.storage.local.get("trackedTeamIds");
   if ((Array.isArray(current) ? current : []).join(",") !== teamIds.join(",")) return false;
 
+  // Heal team records (names/crests/competitions) from the match data so the
+  // next refresh queries only the relevant competitions instead of sweeping.
+  saveTeams(teamsFromMatches(teams, matches), teamIds);
   saveCache(matches, teamIds);
   return true; // wrote a new cache
 }
