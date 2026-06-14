@@ -39,7 +39,10 @@ async function fetchAllMatches(teams) {
         await new Promise((r) => setTimeout(r, resetSecs * 1000 + 200));
       }
     } catch (err) {
-      console.error(`${team.name}:`, err.message);
+      // Expected and handled: skip this team and keep going. A 403 here usually
+      // means the team has an upcoming fixture in a competition outside the
+      // free tier; a 429 means rate-limited. Warn (not error) so it isn't noisy.
+      console.warn(`Skipping ${team.name}:`, err.message);
     }
   }
 
@@ -68,7 +71,9 @@ async function fetchAllTeams(teamIds) {
     try {
       results.push(await fetchTeamInfo(id));
     } catch (err) {
-      console.error(`Team ${id}:`, err.message);
+      // Expected and handled: fall back to a placeholder so the team still
+      // appears; warn (not error) since this is recoverable.
+      console.warn(`Team ${id} info unavailable:`, err.message);
       results.push({ id, name: String(id), shortName: String(id), crest: null, national: false });
     }
   }
