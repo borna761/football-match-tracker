@@ -141,20 +141,33 @@ function buildTrackedSection() {
 
   const chips = document.createElement("div");
   chips.className = "tracked-chips";
+  renderTrackedChips(chips);
 
+  section.appendChild(chips);
+  return section;
+}
+
+// Populate a chips container with the tracked teams, grouped club teams first
+// then national teams (each sorted), with a divider between — mirroring the
+// crest bar in the header.
+function renderTrackedChips(container) {
+  container.innerHTML = "";
   if (TEAMS.length === 0) {
     const empty = document.createElement("span");
     empty.className = "settings-empty";
     empty.textContent = "No teams tracked yet";
-    chips.appendChild(empty);
-  } else {
-    [...TEAMS].sort(byDisplayName).forEach((team) => {
-      chips.appendChild(makeChip(team));
-    });
+    container.appendChild(empty);
+    return;
   }
-
-  section.appendChild(chips);
-  return section;
+  const clubs    = TEAMS.filter((t) => !t.national).sort(byDisplayName);
+  const national = TEAMS.filter((t) =>  t.national).sort(byDisplayName);
+  clubs.forEach((t) => container.appendChild(makeChip(t)));
+  if (clubs.length && national.length) {
+    const divider = document.createElement("div");
+    divider.className = "tracked-divider";
+    container.appendChild(divider);
+  }
+  national.forEach((t) => container.appendChild(makeChip(t)));
 }
 
 function buildAddSection() {
@@ -319,12 +332,7 @@ function renderCompTeamRows(container, teams) {
       btn.textContent = "Added";
       // Refresh the chips section
       const chipsEl = document.querySelector(".tracked-chips");
-      if (chipsEl) {
-        chipsEl.innerHTML = "";
-        [...TEAMS].sort(byDisplayName).forEach((t) => {
-          chipsEl.appendChild(makeChip(t));
-        });
-      }
+      if (chipsEl) renderTrackedChips(chipsEl);
     });
 
     row.appendChild(btn);
