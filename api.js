@@ -6,13 +6,19 @@ const LOOKAHEAD_DAYS = 60;
 // National teams are identified by their runningCompetitions codes instead.
 const NATIONAL_COMP_CODES = new Set(["WC", "EC"]);
 
-async function fetchMatches(team) {
+// Fetch a single competition's matches in the lookahead window.
+// We fetch per competition rather than per team because the team-matches
+// endpoint returns 403 if a team has any fixture in a competition outside the
+// key's plan (it can't be filtered). Per-competition requests instead let us
+// skip the restricted ones and keep what the key can access — which also means
+// a paid key automatically gets the competitions a free key can't.
+async function fetchCompMatches(code) {
   const from = new Date();
   const to = new Date();
   to.setDate(to.getDate() + LOOKAHEAD_DAYS);
   // Use local date for dateFrom so matches from today aren't missed when
   // the local clock is still on "today" but UTC has already rolled over.
-  const url = `https://api.football-data.org/v4/teams/${team.id}/matches?dateFrom=${localIsoDate(from)}&dateTo=${isoDate(to)}`;
+  const url = `https://api.football-data.org/v4/competitions/${code}/matches?dateFrom=${localIsoDate(from)}&dateTo=${isoDate(to)}`;
   const res = await fetch(url, { headers: { "X-Auth-Token": API_KEY } });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const json = await res.json();
@@ -22,24 +28,32 @@ async function fetchMatches(team) {
   return { matches: json.matches || [], remaining, resetSecs };
 }
 
+// Fetch upcoming matches for the given teams. Queries the union of competitions
+// the teams play in (one request each), then keeps only matches involving a
+// tracked team. Competitions the key can't access (free-tier 403) are skipped.
 async function fetchAllMatches(teams) {
+  const trackedIds = new Set(teams.map((t) => t.id));
+  const codes = [...new Set(teams.flatMap((t) => t.competitions || []))];
+
   const allMatches = [];
   const seen = new Set();
 
-  for (const team of teams) {
+  for (const code of codes) {
     try {
-      const { matches, remaining, resetSecs } = await fetchMatches(team);
+      const { matches, remaining, resetSecs } = await fetchCompMatches(code);
       for (const match of matches) {
-        if (!seen.has(match.id)) {
-          seen.add(match.id);
-          allMatches.push(match);
-        }
+        if (!trackedIds.has(match.homeTeam.id) && !trackedIds.has(match.awayTeam.id)) continue;
+        if (seen.has(match.id)) continue;
+        seen.add(match.id);
+        allMatches.push(match);
       }
       if (remaining <= 1 && resetSecs > 0) {
         await new Promise((r) => setTimeout(r, resetSecs * 1000 + 200));
       }
     } catch (err) {
-      console.error(`${team.name}:`, err.message);
+      // Skip competitions outside the key's plan (403) or that error; the rest
+      // still load. warn, not error — this is expected and handled.
+      console.warn(`Skipping competition ${code}:`, err.message);
     }
   }
 
@@ -58,8 +72,10 @@ async function fetchTeamInfo(id) {
   if (remaining <= 1 && resetSecs > 0) {
     await new Promise((r) => setTimeout(r, resetSecs * 1000 + 200));
   }
-  const national = (json.runningCompetitions || []).some((c) => NATIONAL_COMP_CODES.has(c.code));
-  return { id, name: json.name, shortName: json.shortName, crest: json.crest, national };
+  const running = json.runningCompetitions || [];
+  const competitions = running.map((c) => c.code).filter(Boolean);
+  const national = running.some((c) => NATIONAL_COMP_CODES.has(c.code));
+  return { id, name: json.name, shortName: json.shortName, crest: json.crest, national, competitions };
 }
 
 async function fetchAllTeams(teamIds) {
@@ -68,8 +84,10 @@ async function fetchAllTeams(teamIds) {
     try {
       results.push(await fetchTeamInfo(id));
     } catch (err) {
-      console.error(`Team ${id}:`, err.message);
-      results.push({ id, name: String(id), shortName: String(id), crest: null, national: false });
+      // Expected and handled: fall back to a placeholder so the team still
+      // appears; warn (not error) since this is recoverable.
+      console.warn(`Team ${id} info unavailable:`, err.message);
+      results.push({ id, name: String(id), shortName: String(id), crest: null, national: false, competitions: [] });
     }
   }
   return results;

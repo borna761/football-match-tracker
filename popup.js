@@ -19,12 +19,15 @@ async function readRawMatchCache() {
 async function addTeam(id, knownInfo = null) {
   if (TEAM_IDS.includes(id)) return;
 
+  // We need the team's competition list to fetch its matches. Settings passes
+  // knownInfo from the competition browser, which lacks it, so fetch full team
+  // info whenever competitions are missing.
   let info = knownInfo;
-  if (!info) {
+  if (!info || !info.competitions) {
     try {
       info = await fetchTeamInfo(id);
     } catch {
-      info = { id, name: String(id), shortName: String(id), crest: null, national: false };
+      info = { id, name: String(id), shortName: String(id), crest: null, national: false, competitions: [] };
     }
   }
 
@@ -42,7 +45,7 @@ async function addTeam(id, knownInfo = null) {
   const existing = await readRawMatchCache();
   if (existing) {
     try {
-      const { matches: fresh } = await fetchMatches(info);
+      const fresh = await fetchAllMatches([info]);
       const seen = new Set(existing.matches.map((m) => m.id));
       const merged = [...existing.matches];
       for (const m of fresh) {
