@@ -50,6 +50,15 @@ describe("teamsFromMatches", () => {
     expect(healed.competitions).toEqual(["WC"]);
   });
 
+  test("keeps an existing national flag even when current matches aren't WC/EC", () => {
+    // A national team added via the WC browser (national:true) whose only
+    // fixtures in the window are friendlies must not be reclassified as a club.
+    const teams = [{ id: 764, name: "Brazil", national: true, competitions: [] }];
+    const matches = [match(BRAZIL, ARSENAL, "FRIENDLY")];
+    const [healed] = teamsFromMatches(teams, matches);
+    expect(healed.national).toBe(true);
+  });
+
   test("leaves a team with no matches untouched", () => {
     const original = { id: 57, name: "57", competitions: [] };
     const [healed] = teamsFromMatches([original], []);

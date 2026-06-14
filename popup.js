@@ -41,9 +41,12 @@ async function addTeam(id, knownInfo = null) {
   saveTeams(TEAMS);
 
   // Fetch only this team's matches and merge into the existing cache so we
-  // don't need to re-fetch every other team again.
+  // don't need to re-fetch every other team again. Skip when the team's
+  // competition is unknown (fetchTeamInfo failed) — fetchAllMatches would then
+  // sweep all 11 competitions just for this one add; let the next full refresh
+  // pick it up instead.
   const existing = await readRawMatchCache();
-  if (existing) {
+  if (existing && info.competitions && info.competitions.length) {
     try {
       const fresh = await fetchAllMatches([info]);
       const seen = new Set(existing.matches.map((m) => m.id));
@@ -280,11 +283,8 @@ async function renderMatches(matches) {
 function renderCrests() {
   const container = document.getElementById("team-crests");
   container.innerHTML = "";
-  const byName = (a, b) => (a.name ?? "").localeCompare(b.name ?? "");
-  const sorted = [
-    ...TEAMS.filter((t) => !t.national).sort(byName),
-    ...TEAMS.filter((t) =>  t.national).sort(byName),
-  ];
+  const { clubs, national } = groupTeams(TEAMS);
+  const sorted = [...clubs, ...national];
   let dividedInserted = false;
   for (const team of sorted) {
     if (team.national && !dividedInserted) {
@@ -318,7 +318,11 @@ function renderCrests() {
 // re-render the crest bar. Lets clubs whose /v4/teams/{id} endpoint is 403'd
 // still show a real name once their matches load.
 function healTeams(matches) {
-  TEAMS.splice(0, TEAMS.length, ...teamsFromMatches(TEAMS, matches));
+  const healed = teamsFromMatches(TEAMS, matches);
+  // Skip the storage write and crest re-render when nothing actually changed —
+  // healTeams runs on every popup open, usually with already-current records.
+  if (JSON.stringify(healed) === JSON.stringify(TEAMS)) return;
+  TEAMS.splice(0, TEAMS.length, ...healed);
   saveTeams(TEAMS);
   renderCrests();
 }
@@ -363,16 +367,11 @@ async function load() {
     if (!cache) {
       const matches = await fetchAllMatches(TEAMS);
       if (matches.length === 0 && TEAMS.length > 0) {
-        const container = document.getElementById("matches-container");
-        container.innerHTML = "";
-        const el = document.createElement("div");
-        el.id = "error";
-        el.textContent = "Failed to load matches — API may be rate limited. ";
-        const retry = document.createElement("a");
-        retry.textContent = "Try again";
-        retry.addEventListener("click", load);
-        el.appendChild(retry);
-        container.appendChild(el);
+        // No matches: either genuinely none in the window (off-season) or a
+        // transient fetch failure. Show the normal "No upcoming matches" empty
+        // state and don't cache it, so the next open re-checks.
+        _lastMatches = [];
+        await renderMatches([]);
         return;
       }
       cache = saveCache(matches, TEAM_IDS);

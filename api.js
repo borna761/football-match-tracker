@@ -11,6 +11,11 @@ const NATIONAL_COMP_CODES = new Set(["WC", "EC"]);
 // whose /v4/teams/{id} record is 403'd because it's in a restricted competition.
 const FREE_COMP_CODES = ["PL", "PD", "BL1", "SA", "FL1", "CL", "WC", "EC", "ELC", "DED", "PPL"];
 
+// A team with no fixtures in the window never gets a competition recorded, so it
+// would otherwise re-trigger the full free-tier sweep on every refresh forever.
+// Throttle the sweep to at most once per this interval.
+const SWEEP_THROTTLE_MS = 12 * 60 * 60 * 1000; // 12 hours
+
 // Fetch a single competition's matches in the lookahead window.
 // We fetch per competition rather than per team because the team-matches
 // endpoint returns 403 if a team has any fixture in a competition outside the
@@ -33,6 +38,20 @@ async function fetchCompMatches(code) {
   return { matches: json.matches || [], remaining, resetSecs };
 }
 
+// Returns true at most once per SWEEP_THROTTLE_MS, stamping the time it allows a
+// sweep — so the all-competitions fallback can't run on every refresh.
+function sweepDue() {
+  return new Promise((resolve) => {
+    chrome.storage.local.get("lastCompSweep", (data) => {
+      if (data.lastCompSweep && Date.now() - data.lastCompSweep < SWEEP_THROTTLE_MS) {
+        return resolve(false);
+      }
+      chrome.storage.local.set({ lastCompSweep: Date.now() });
+      resolve(true);
+    });
+  });
+}
+
 // Fetch upcoming matches for the given teams. Queries the union of competitions
 // the teams play in (one request each), then keeps only matches involving a
 // tracked team. Competitions the key can't access (free-tier 403) are skipped.
@@ -41,9 +60,10 @@ async function fetchAllMatches(teams) {
   const codes = new Set(teams.flatMap((t) => t.competitions || []));
   // If any team has no known competition (e.g. a club whose team-info endpoint
   // is 403'd), sweep all free-tier competitions and filter by team id. Match
-  // data carries the team's real competition, so the sweep self-corrects on the
-  // next refresh once teamsFromMatches() records it.
-  if (teams.some((t) => !(t.competitions && t.competitions.length))) {
+  // data carries the team's real competition, so the sweep self-corrects once
+  // teamsFromMatches() records it. Throttled so a team that simply has no
+  // fixtures (off-season) doesn't re-sweep all 11 competitions every refresh.
+  if (teams.some((t) => !(t.competitions && t.competitions.length)) && await sweepDue()) {
     for (const c of FREE_COMP_CODES) codes.add(c);
   }
 
@@ -80,9 +100,19 @@ async function fetchAllMatches(teams) {
 // and its competition recorded for the next, cheaper refresh. Teams with no
 // matches in range keep their existing record. Pure — exported for testing.
 function teamsFromMatches(teams, matches) {
+  // Bucket matches by team id in one pass (O(matches)) rather than filtering the
+  // full list per team (O(teams × matches)).
+  const byTeam = new Map();
+  for (const m of matches) {
+    for (const side of [m.homeTeam, m.awayTeam]) {
+      const list = byTeam.get(side.id);
+      if (list) list.push(m); else byTeam.set(side.id, [m]);
+    }
+  }
+
   return teams.map((t) => {
-    const mine = matches.filter((m) => m.homeTeam.id === t.id || m.awayTeam.id === t.id);
-    if (mine.length === 0) return t;
+    const mine = byTeam.get(t.id);
+    if (!mine) return t;
     const sample = mine[0].homeTeam.id === t.id ? mine[0].homeTeam : mine[0].awayTeam;
     const discovered = mine.map((m) => m.competition.code).filter(Boolean);
     // Union with existing codes so a competition that simply has no fixtures in
@@ -93,7 +123,11 @@ function teamsFromMatches(teams, matches) {
       name:      sample.name      ?? t.name,
       shortName: sample.shortName ?? t.shortName,
       crest:     sample.crest     ?? t.crest,
-      national:  competitions.some((c) => NATIONAL_COMP_CODES.has(c)),
+      // National identity is sticky: keep an existing true (set when the team was
+      // added from a WC/EC competition) and only ever add it from match data —
+      // never flip a national team to club because its current fixtures happen
+      // to be friendlies/qualifiers outside WC/EC.
+      national:  t.national || competitions.some((c) => NATIONAL_COMP_CODES.has(c)),
       competitions,
     };
   });

@@ -19,11 +19,7 @@ let _settingsOpen = false;
 let _teamAddedInSettings = false;
 let _compTeams = [];
 
-// Sort by the label actually shown in the row (shortName falls back to name),
-// so the displayed list reads alphabetically — e.g. "Leverkusen" sorts under L,
-// not B (Bayer 04 Leverkusen).
-const byDisplayName = (a, b) =>
-  (a.shortName || a.name || "").localeCompare(b.shortName || b.name || "");
+// byDisplayName and groupTeams come from utils.js (loaded before this file).
 
 function openSettings() {
   _settingsOpen = true;
@@ -159,8 +155,7 @@ function renderTrackedChips(container) {
     container.appendChild(empty);
     return;
   }
-  const clubs    = TEAMS.filter((t) => !t.national).sort(byDisplayName);
-  const national = TEAMS.filter((t) =>  t.national).sort(byDisplayName);
+  const { clubs, national } = groupTeams(TEAMS);
   clubs.forEach((t) => container.appendChild(makeChip(t)));
   if (clubs.length && national.length) {
     const divider = document.createElement("div");
