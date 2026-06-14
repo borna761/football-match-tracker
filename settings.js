@@ -52,8 +52,8 @@ function renderSettingsPanel() {
   const panel = document.getElementById("settings-panel");
   panel.innerHTML = "";
   panel.appendChild(buildTrackedSection());
-  panel.appendChild(buildAddSection());
   panel.appendChild(buildNotificationsSection());
+  panel.appendChild(buildAddSection());
   panel.appendChild(buildSupportSection());
 }
 
