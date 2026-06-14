@@ -45,7 +45,24 @@ function isVisible(m, trackedIds, enabledIds) {
   return homeOn || awayOn;
 }
 
+// ── Team grouping / sorting ───────────────────────────────────────────────────
+// Sort by the label actually shown (shortName, falling back to name) so lists
+// read alphabetically — e.g. "Leverkusen" under L, not B (Bayer 04 Leverkusen).
+function byDisplayName(a, b) {
+  return (a.shortName || a.name || "").localeCompare(b.shortName || b.name || "");
+}
+
+// Split teams into club and national groups, each sorted by display name.
+// Shared by the header crest bar and the settings tracked-team chips so the two
+// always order teams identically.
+function groupTeams(teams) {
+  return {
+    clubs:    teams.filter((t) => !t.national).sort(byDisplayName),
+    national: teams.filter((t) =>  t.national).sort(byDisplayName),
+  };
+}
+
 // CommonJS export for Jest — not executed in the browser extension context
 if (typeof module !== "undefined") {
-  module.exports = { isoDate, localIsoDate, formatTime, formatDateLabel, dateKey, EXCLUDED_STATUSES, isVisible };
+  module.exports = { isoDate, localIsoDate, formatTime, formatDateLabel, dateKey, EXCLUDED_STATUSES, isVisible, byDisplayName, groupTeams };
 }

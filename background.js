@@ -47,18 +47,17 @@ async function updateBadge() {
   chrome.action.setBadgeBackgroundColor({ color: "#f97316" });
 
   // Tooltip
+  const label = (m) => {
+    const home = m.homeTeam.shortName || m.homeTeam.name;
+    const away = m.awayTeam.shortName || m.awayTeam.name;
+    const comp = m.competition?.name ? ` (${m.competition.name})` : "";
+    return `${home} vs ${away}${comp}`;
+  };
   let title = "Football Match Tracker";
   if (todayMatches.length > 0) {
-    const lines = todayMatches.map((m) => {
-      const home = m.homeTeam.shortName || m.homeTeam.name;
-      const away = m.awayTeam.shortName || m.awayTeam.name;
-      return `${formatTime(m.utcDate)}  ${home} vs ${away}`;
-    });
-    title = lines.join("\n");
+    title = todayMatches.map((m) => `${formatTime(m.utcDate)}  ${label(m)}`).join("\n");
   } else if (nextMatch) {
-    const home = nextMatch.homeTeam.shortName || nextMatch.homeTeam.name;
-    const away = nextMatch.awayTeam.shortName || nextMatch.awayTeam.name;
-    title = `Next: ${home} vs ${away}\n${formatMatchDay(nextMatch.utcDate)} · ${formatTime(nextMatch.utcDate)}`;
+    title = `Next: ${label(nextMatch)}\n${formatMatchDay(nextMatch.utcDate)} · ${formatTime(nextMatch.utcDate)}`;
   }
   chrome.action.setTitle({ title });
 }
@@ -157,11 +156,12 @@ async function refreshMatches() {
 
   if (await loadCache(teamIds)) return false; // cache is present and fresh
 
+  // Start from cached team records if present, else bare id records. We never
+  // call /v4/teams/{id} here — it 403s for clubs in restricted competitions.
+  // Names and competitions are derived from match data below instead.
   let teams = await loadTeams(teamIds);
-  if (!teams) {
-    teams = await fetchAllTeams(teamIds);
-    saveTeams(teams, teamIds);
-  }
+  if (!teams) teams = teamIds.map((id) => ({ id, name: String(id), competitions: [] }));
+
   const matches = await fetchAllMatches(teams);
   // Don't overwrite a good cache with an empty result from a rate-limited fetch.
   if (matches.length === 0) return false;
@@ -172,6 +172,9 @@ async function refreshMatches() {
   const { trackedTeamIds: current } = await chrome.storage.local.get("trackedTeamIds");
   if ((Array.isArray(current) ? current : []).join(",") !== teamIds.join(",")) return false;
 
+  // Heal team records (names/crests/competitions) from the match data so the
+  // next refresh queries only the relevant competitions instead of sweeping.
+  saveTeams(teamsFromMatches(teams, matches));
   saveCache(matches, teamIds);
   return true; // wrote a new cache
 }

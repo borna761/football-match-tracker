@@ -19,6 +19,8 @@ let _settingsOpen = false;
 let _teamAddedInSettings = false;
 let _compTeams = [];
 
+// byDisplayName and groupTeams come from utils.js (loaded before this file).
+
 function openSettings() {
   _settingsOpen = true;
   _teamAddedInSettings = false;
@@ -46,8 +48,8 @@ function renderSettingsPanel() {
   const panel = document.getElementById("settings-panel");
   panel.innerHTML = "";
   panel.appendChild(buildTrackedSection());
-  panel.appendChild(buildAddSection());
   panel.appendChild(buildNotificationsSection());
+  panel.appendChild(buildAddSection());
   panel.appendChild(buildSupportSection());
 }
 
@@ -135,20 +137,32 @@ function buildTrackedSection() {
 
   const chips = document.createElement("div");
   chips.className = "tracked-chips";
+  renderTrackedChips(chips);
 
+  section.appendChild(chips);
+  return section;
+}
+
+// Populate a chips container with the tracked teams, grouped club teams first
+// then national teams (each sorted), with a divider between — mirroring the
+// crest bar in the header.
+function renderTrackedChips(container) {
+  container.innerHTML = "";
   if (TEAMS.length === 0) {
     const empty = document.createElement("span");
     empty.className = "settings-empty";
     empty.textContent = "No teams tracked yet";
-    chips.appendChild(empty);
-  } else {
-    [...TEAMS].sort((a, b) => a.name.localeCompare(b.name)).forEach((team) => {
-      chips.appendChild(makeChip(team));
-    });
+    container.appendChild(empty);
+    return;
   }
-
-  section.appendChild(chips);
-  return section;
+  const { clubs, national } = groupTeams(TEAMS);
+  clubs.forEach((t) => container.appendChild(makeChip(t)));
+  if (clubs.length && national.length) {
+    const divider = document.createElement("div");
+    divider.className = "tracked-divider";
+    container.appendChild(divider);
+  }
+  national.forEach((t) => container.appendChild(makeChip(t)));
 }
 
 function buildAddSection() {
@@ -281,7 +295,7 @@ function renderCompTeamRows(container, teams) {
     container.innerHTML = `<div class="settings-status">No teams found.</div>`;
     return;
   }
-  const sorted = [...teams].sort((a, b) => a.name.localeCompare(b.name));
+  const sorted = [...teams].sort(byDisplayName);
   for (const team of sorted) {
     const isTracked = TEAM_IDS.includes(team.id);
     const row = document.createElement("div");
@@ -313,12 +327,7 @@ function renderCompTeamRows(container, teams) {
       btn.textContent = "Added";
       // Refresh the chips section
       const chipsEl = document.querySelector(".tracked-chips");
-      if (chipsEl) {
-        chipsEl.innerHTML = "";
-        [...TEAMS].sort((a, b) => a.name.localeCompare(b.name)).forEach((t) => {
-          chipsEl.appendChild(makeChip(t));
-        });
-      }
+      if (chipsEl) renderTrackedChips(chipsEl);
     });
 
     row.appendChild(btn);

@@ -327,6 +327,14 @@ body {
   min-height: 24px;
 }
 
+/* Full-width break + line between the club and national chip groups. */
+.tracked-divider {
+  flex-basis: 100%;
+  height: 0;
+  margin: 2px 0;
+  border-top: 1px solid var(--border);
+}
+
 .team-chip {
   display: flex;
   align-items: center;
