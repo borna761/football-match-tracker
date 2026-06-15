@@ -208,7 +208,9 @@ async function renderMatches(matches) {
   const todayStr = localIsoDate(new Date());
   const visible  = filterMatches(matches, todayStr, TRACKED_IDS, enabledTeamIds);
 
-  const todayCount = visible.filter((m) => localIsoDate(new Date(m.utcDate)) === todayStr).length;
+  const todayCount = visible.filter(
+    (m) => localIsoDate(new Date(m.utcDate)) === todayStr && m.status !== "FINISHED"
+  ).length;
   chrome.action.setBadgeText({ text: todayCount > 0 ? String(todayCount) : "" });
   chrome.action.setBadgeBackgroundColor({ color: "#f97316" });
 
