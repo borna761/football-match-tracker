@@ -34,7 +34,9 @@ async function updateBadge() {
 
   const todayMatches = matches.filter((m) => {
     if (!isVisible(m, trackedIds, enabledIds)) return false;
-    return localIsoDate(new Date(m.utcDate)) === todayStr;
+    if (localIsoDate(new Date(m.utcDate)) !== todayStr) return false;
+    if (m.status === "FINISHED") return false;
+    return true;
   });
 
   const nextMatch = matches.find((m) => {
