@@ -120,7 +120,9 @@ function teamEl(team, side) {
 function renderMatch(match, fotmobData) {
   const fotmobUrl = fotmobData?.url ?? fotmobData;
   const { status, score } = match;
-  const isLive     = status === "IN_PLAY";
+  // Trust FotMob's live flag when the fd.org cache is stale — the match may
+  // have kicked off while the cached status is still TIMED/SCHEDULED.
+  const isLive     = status === "IN_PLAY" || fotmobData?.live != null;
   const isHalfTime = status === "PAUSED";
   const isFinished = status === "FINISHED";
 
@@ -279,7 +281,7 @@ async function renderMatches(matches) {
     }
   }
 
-  return visible.some((m) => m.status === "IN_PLAY" || m.status === "PAUSED");
+  return visible.some((m) => m.status === "IN_PLAY" || m.status === "PAUSED" || getFotmobData(m, fotmobMap)?.live != null);
 }
 
 function renderCrests() {
