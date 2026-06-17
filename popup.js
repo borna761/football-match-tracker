@@ -120,9 +120,13 @@ function teamEl(team, side) {
 function renderMatch(match, fotmobData) {
   const fotmobUrl = fotmobData?.url ?? fotmobData;
   const { status, score } = match;
-  const isLive     = status === "IN_PLAY";
-  const isHalfTime = status === "PAUSED";
   const isFinished = status === "FINISHED";
+  // Trust FotMob's live flag when the fd.org cache is stale — the match may
+  // have kicked off while the cached status is still TIMED/SCHEDULED.
+  // Guard against FINISHED so a briefly-stale FotMob entry doesn't keep
+  // scheduleLiveRefresh running after the match ends.
+  const isLive     = status === "IN_PLAY" || (!isFinished && fotmobData?.live != null);
+  const isHalfTime = status === "PAUSED";
 
   const row = document.createElement("div");
   row.className = "match-row";
@@ -235,6 +239,8 @@ async function renderMatches(matches) {
   const today    = visible.filter((m) => localIsoDate(new Date(m.utcDate)) === todayStr);
   const upcoming = visible.filter((m) => localIsoDate(new Date(m.utcDate)) >  todayStr);
 
+  let anyLive = false;
+
   function appendSection(label, sectionMatches, { subgroups = false } = {}) {
     if (sectionMatches.length === 0) return null;
     let anchor = null;
@@ -261,7 +267,12 @@ async function renderMatches(matches) {
           if (!anchor) anchor = group;
         }
       }
-      fragment.appendChild(renderMatch(match, getFotmobData(match, fotmobMap)));
+      const fData = getFotmobData(match, fotmobMap);
+      const s = match.status;
+      if (s === "IN_PLAY" || s === "PAUSED" || (s !== "FINISHED" && fData?.live != null)) {
+        anyLive = true;
+      }
+      fragment.appendChild(renderMatch(match, fData));
     }
     return anchor;
   }
@@ -279,7 +290,7 @@ async function renderMatches(matches) {
     }
   }
 
-  return visible.some((m) => m.status === "IN_PLAY" || m.status === "PAUSED");
+  return anyLive;
 }
 
 function renderCrests() {
