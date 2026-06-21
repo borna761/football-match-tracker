@@ -367,15 +367,9 @@ async function scheduleLiveRefresh() {
   clearTimeout(_liveTimer);
   _liveTimer = setTimeout(async () => {
     try {
-      // If the cache has expired since the last render, fetch fresh data so
-      // status changes (IN_PLAY → FINISHED) are picked up rather than
-      // re-rendering the same stale matches indefinitely.
-      if (!await loadCache(TEAM_IDS)) {
-        await load(); // fetches fresh, re-renders, restarts timer if still live
-        return;
-      }
-      const stillLive = await renderMatches(_lastMatches);
-      if (stillLive) scheduleLiveRefresh();
+      // load() owns the "cache fresh → render, stale → fetch" decision,
+      // so delegate entirely — no redundant TTL check or double storage read.
+      await load();
     } catch { /* silently skip failed live refresh */ }
   }, 30_000);
 }

@@ -201,12 +201,16 @@ async function refreshAndUpdate() {
 // Register the periodic alarms. Called from onStartup and onInstalled — not at
 // the top level — so the countdown isn't reset on every service-worker wake-up.
 function ensureAlarms() {
-  // Fetch fresh match data every 6 hours. Fixtures change slowly and the
-  // 1-minute tick keeps the badge current from cache (incl. midnight), so this
-  // stays well clear of the API rate limit. Trade-off: if the popup is never
-  // opened, cached data can lag reality by up to ~6 hours.
-  chrome.alarms.create("refreshMatches",     { periodInMinutes:  60 });
-  chrome.alarms.create("checkNotifications", { periodInMinutes:   1 });
+  // Fetch fresh match data every hour. The 1-minute tick keeps the badge
+  // current from cache (incl. midnight), so this stays well clear of the API
+  // rate limit. Trade-off: if the popup is never opened, cached data can lag
+  // reality by up to ~1 hour.
+  // Clear before re-creating so a period change (e.g. from a previous version)
+  // takes effect immediately rather than being silently ignored.
+  chrome.alarms.clear("refreshMatches", () => {
+    chrome.alarms.create("refreshMatches", { periodInMinutes: 60 });
+  });
+  chrome.alarms.create("checkNotifications", { periodInMinutes: 1 });
 }
 
 // Update badge when the browser starts
@@ -231,7 +235,7 @@ chrome.runtime.onInstalled.addListener(() => {
 });
 
 chrome.alarms.onAlarm.addListener((alarm) => {
-  // Every 6 hours: refresh the cache from the API, then update badge/notifications.
+  // Every hour: refresh the cache from the API, then update badge/notifications.
   if (alarm.name === "refreshMatches") refreshAndUpdate();
   // Every minute: fire due notifications and keep the badge current across
   // midnight. No fetch here — that would blow the API rate limit.
