@@ -205,7 +205,7 @@ function ensureAlarms() {
   // 1-minute tick keeps the badge current from cache (incl. midnight), so this
   // stays well clear of the API rate limit. Trade-off: if the popup is never
   // opened, cached data can lag reality by up to ~6 hours.
-  chrome.alarms.create("refreshMatches",     { periodInMinutes: 360 });
+  chrome.alarms.create("refreshMatches",     { periodInMinutes:  60 });
   chrome.alarms.create("checkNotifications", { periodInMinutes:   1 });
 }
 

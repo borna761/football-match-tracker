@@ -363,12 +363,19 @@ function showError(msg) {
 let _liveTimer  = null;
 let _lastMatches = null;
 
-async function scheduleLiveRefresh(cachedMatches) {
+async function scheduleLiveRefresh() {
   clearTimeout(_liveTimer);
   _liveTimer = setTimeout(async () => {
     try {
-      const stillLive = await renderMatches(cachedMatches);
-      if (stillLive) scheduleLiveRefresh(cachedMatches);
+      // If the cache has expired since the last render, fetch fresh data so
+      // status changes (IN_PLAY → FINISHED) are picked up rather than
+      // re-rendering the same stale matches indefinitely.
+      if (!await loadCache(TEAM_IDS)) {
+        await load(); // fetches fresh, re-renders, restarts timer if still live
+        return;
+      }
+      const stillLive = await renderMatches(_lastMatches);
+      if (stillLive) scheduleLiveRefresh();
     } catch { /* silently skip failed live refresh */ }
   }, 30_000);
 }
@@ -392,7 +399,7 @@ async function load() {
     }
     _lastMatches = cache.matches;
     const hasLive = await renderMatches(cache.matches);
-    if (hasLive) scheduleLiveRefresh(cache.matches);
+    if (hasLive) scheduleLiveRefresh();
   } catch (err) {
     showError(`Failed to load: ${err.message}`);
   }
@@ -422,7 +429,7 @@ if (typeof document !== "undefined") {
       healTeams(matchCache.matches); // fill in any placeholder names from cached data
       _lastMatches = matchCache.matches;
       const hasLive = await renderMatches(matchCache.matches);
-      if (hasLive) scheduleLiveRefresh(matchCache.matches);
+      if (hasLive) scheduleLiveRefresh();
 
       // Re-fetch in background if stale (don't show spinner)
       if (Date.now() - matchCache.timestamp >= CACHE_TTL_MS) {
@@ -432,7 +439,7 @@ if (typeof document !== "undefined") {
           healTeams(fresh);
           _lastMatches = cache.matches;
           const stillLive = await renderMatches(cache.matches);
-          if (stillLive) scheduleLiveRefresh(cache.matches);
+          if (stillLive) scheduleLiveRefresh();
           else clearTimeout(_liveTimer);
         }
       }
