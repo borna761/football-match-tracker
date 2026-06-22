@@ -45,6 +45,16 @@ function isVisible(m, trackedIds, enabledIds) {
   return homeOn || awayOn;
 }
 
+// ── Kickoff expiry ────────────────────────────────────────────────────────────
+
+// The fd.org cache refreshes every 6 hours, so a FINISHED match may still
+// appear as IN_PLAY in the cache. Drop it from badge / count if the kickoff
+// was more than 120 minutes ago — the match is almost certainly over.
+const KICKOFF_EXPIRY_MS = 120 * 60 * 1000;
+function isKickoffExpired(utcDate) {
+  return Date.now() - new Date(utcDate).getTime() > KICKOFF_EXPIRY_MS;
+}
+
 // ── Team grouping / sorting ───────────────────────────────────────────────────
 // Sort by the label actually shown (shortName, falling back to name) so lists
 // read alphabetically — e.g. "Leverkusen" under L, not B (Bayer 04 Leverkusen).
@@ -64,5 +74,5 @@ function groupTeams(teams) {
 
 // CommonJS export for Jest — not executed in the browser extension context
 if (typeof module !== "undefined") {
-  module.exports = { isoDate, localIsoDate, formatTime, formatDateLabel, dateKey, EXCLUDED_STATUSES, isVisible, byDisplayName, groupTeams };
+  module.exports = { isoDate, localIsoDate, formatTime, formatDateLabel, dateKey, EXCLUDED_STATUSES, isVisible, isKickoffExpired, byDisplayName, groupTeams };
 }

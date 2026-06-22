@@ -193,6 +193,16 @@ function getFotmobData(match, fotmobMap) {
   return { url: `https://www.fotmob.com/search?q=${encodeURIComponent(`${home} ${away}`)}`, live: null };
 }
 
+// Returns true when a match is in progress and warrants a 30-second live
+// refresh. Includes PAUSED (half-time) because the score can change once the
+// second half kicks off. Callers that only want to show a live-score UI (not
+// schedule a refresh) should additionally exclude PAUSED.
+function isMatchInProgress(status, fotmobData) {
+  if (status === "IN_PLAY" || status === "PAUSED") return true;
+  if (status === "FINISHED") return false;
+  return fotmobData?.live != null;
+}
+
 if (typeof module !== "undefined") {
-  module.exports = { normalizeTeam, getFotmobData, _namesMatch, _teamVariants };
+  module.exports = { normalizeTeam, getFotmobData, isMatchInProgress, _namesMatch, _teamVariants };
 }
