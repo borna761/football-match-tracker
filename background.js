@@ -213,7 +213,9 @@ function ensureAlarms() {
   chrome.alarms.clear("refreshMatches", () => {
     chrome.alarms.create("refreshMatches", { periodInMinutes: 360 });
   });
-  chrome.alarms.create("checkNotifications", { periodInMinutes: 1 });
+  chrome.alarms.clear("checkNotifications", () => {
+    chrome.alarms.create("checkNotifications", { periodInMinutes: 1 });
+  });
 }
 
 // Update badge when the browser starts

@@ -212,9 +212,12 @@ async function renderMatches(matches) {
   const todayStr = localIsoDate(new Date());
   const visible  = filterMatches(matches, todayStr, TRACKED_IDS, enabledTeamIds);
 
-  const todayCount = visible.filter(
-    (m) => localIsoDate(new Date(m.utcDate)) === todayStr && m.status !== "FINISHED"
-  ).length;
+  const todayCount = visible.filter((m) => {
+    if (localIsoDate(new Date(m.utcDate)) !== todayStr) return false;
+    if (m.status === "FINISHED") return false;
+    if (Date.now() - new Date(m.utcDate).getTime() > 120 * 60 * 1000) return false;
+    return true;
+  }).length;
   chrome.action.setBadgeText({ text: todayCount > 0 ? String(todayCount) : "" });
   chrome.action.setBadgeBackgroundColor({ color: "#f97316" });
 
@@ -367,14 +370,17 @@ async function scheduleLiveRefresh() {
   clearTimeout(_liveTimer);
   _liveTimer = setTimeout(async () => {
     try {
-      // load() owns the "cache fresh → render, stale → fetch" decision,
-      // so delegate entirely — no redundant TTL check or double storage read.
-      await load();
-    } catch { /* silently skip failed live refresh */ }
+      // Suppress error UI on live-refresh ticks — a transient failure should
+      // keep the existing match display intact, not replace it with an error.
+      // load() rethrows when suppressError is true so we can re-arm below.
+      await load(true);
+    } catch {
+      scheduleLiveRefresh(); // re-arm even on failure so the loop survives blips
+    }
   }, 30_000);
 }
 
-async function load() {
+async function load(suppressError = false) {
   clearTimeout(_liveTimer);
   try {
     let cache = await loadCache(TEAM_IDS);
@@ -395,7 +401,8 @@ async function load() {
     const hasLive = await renderMatches(cache.matches);
     if (hasLive) scheduleLiveRefresh();
   } catch (err) {
-    showError(`Failed to load: ${err.message}`);
+    if (!suppressError) showError(`Failed to load: ${err.message}`);
+    throw err;
   }
 }
 
