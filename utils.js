@@ -45,17 +45,7 @@ function isVisible(m, trackedIds, enabledIds) {
   return homeOn || awayOn;
 }
 
-// ── Live-match helpers ────────────────────────────────────────────────────────
-
-// A match is considered live (in progress, warrants 30-second refresh) if
-// fd.org reports it as active OR FotMob's live flag is set and the match
-// isn't marked FINISHED. PAUSED (half-time) is included because the score
-// can change when the second half kicks off.
-function isMatchLive(status, fotmobData) {
-  if (status === "IN_PLAY" || status === "PAUSED") return true;
-  if (status === "FINISHED") return false;
-  return fotmobData?.live != null;
-}
+// ── Kickoff expiry ────────────────────────────────────────────────────────────
 
 // The fd.org cache refreshes every 6 hours, so a FINISHED match may still
 // appear as IN_PLAY in the cache. Drop it from badge / count if the kickoff
@@ -84,5 +74,5 @@ function groupTeams(teams) {
 
 // CommonJS export for Jest — not executed in the browser extension context
 if (typeof module !== "undefined") {
-  module.exports = { isoDate, localIsoDate, formatTime, formatDateLabel, dateKey, EXCLUDED_STATUSES, isVisible, isMatchLive, isKickoffExpired, byDisplayName, groupTeams };
+  module.exports = { isoDate, localIsoDate, formatTime, formatDateLabel, dateKey, EXCLUDED_STATUSES, isVisible, isKickoffExpired, byDisplayName, groupTeams };
 }

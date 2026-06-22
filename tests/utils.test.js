@@ -1,4 +1,4 @@
-const { isoDate, localIsoDate, formatTime, formatDateLabel, dateKey, isMatchLive, isKickoffExpired } = require("../utils");
+const { isoDate, localIsoDate, formatTime, formatDateLabel, dateKey, isKickoffExpired } = require("../utils");
 
 // All tests run with TZ=UTC (set via npm test script)
 
@@ -129,33 +129,3 @@ describe("isKickoffExpired", () => {
   });
 });
 
-describe("isMatchLive", () => {
-  const withLive = { live: { homeScore: 1, awayScore: 0 } };
-  const noLive   = null;
-
-  test("IN_PLAY is live regardless of fotmob data", () => {
-    expect(isMatchLive("IN_PLAY", noLive)).toBe(true);
-    expect(isMatchLive("IN_PLAY", withLive)).toBe(true);
-  });
-
-  test("PAUSED (half-time) is live", () => {
-    expect(isMatchLive("PAUSED", noLive)).toBe(true);
-  });
-
-  test("FINISHED is never live", () => {
-    expect(isMatchLive("FINISHED", withLive)).toBe(false);
-    expect(isMatchLive("FINISHED", noLive)).toBe(false);
-  });
-
-  test("TIMED with FotMob live data is live (stale fd.org cache)", () => {
-    expect(isMatchLive("TIMED", withLive)).toBe(true);
-  });
-
-  test("TIMED without FotMob live data is not live", () => {
-    expect(isMatchLive("TIMED", noLive)).toBe(false);
-  });
-
-  test("SCHEDULED without FotMob live data is not live", () => {
-    expect(isMatchLive("SCHEDULED", noLive)).toBe(false);
-  });
-});

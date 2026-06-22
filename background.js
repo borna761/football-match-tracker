@@ -36,7 +36,7 @@ async function updateBadge() {
     if (!isVisible(m, trackedIds, enabledIds)) return false;
     if (localIsoDate(new Date(m.utcDate)) !== todayStr) return false;
     if (m.status === "FINISHED") return false;
-    if (isKickoffExpired(m.utcDate)) return false;
+    if (isKickoffExpired(m.utcDate)) return false; // cache may be stale; drop matches >120 min past kickoff
     return true;
   });
 

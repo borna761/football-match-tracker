@@ -1,4 +1,4 @@
-const { normalizeTeam, getFotmobData, _namesMatch, _teamVariants } = require("../fotmob");
+const { normalizeTeam, getFotmobData, isMatchInProgress, _namesMatch, _teamVariants } = require("../fotmob");
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -162,5 +162,36 @@ describe("getFotmobData — search fallback", () => {
     );
     expect(result.url).toContain("Liverpool");
     expect(result.url).not.toContain("Liverpool FC");
+  });
+});
+
+describe("isMatchInProgress", () => {
+  const withLive = { live: { home: 1, away: 0, minute: "67" } };
+  const noLive   = { live: null };
+
+  test("IN_PLAY is in progress regardless of fotmob data", () => {
+    expect(isMatchInProgress("IN_PLAY", noLive)).toBe(true);
+    expect(isMatchInProgress("IN_PLAY", withLive)).toBe(true);
+  });
+
+  test("PAUSED (half-time) is in progress", () => {
+    expect(isMatchInProgress("PAUSED", noLive)).toBe(true);
+  });
+
+  test("FINISHED is never in progress", () => {
+    expect(isMatchInProgress("FINISHED", withLive)).toBe(false);
+    expect(isMatchInProgress("FINISHED", noLive)).toBe(false);
+  });
+
+  test("TIMED with FotMob live data is in progress (stale fd.org cache)", () => {
+    expect(isMatchInProgress("TIMED", withLive)).toBe(true);
+  });
+
+  test("TIMED without FotMob live data is not in progress", () => {
+    expect(isMatchInProgress("TIMED", noLive)).toBe(false);
+  });
+
+  test("SCHEDULED without FotMob live data is not in progress", () => {
+    expect(isMatchInProgress("SCHEDULED", noLive)).toBe(false);
   });
 });
