@@ -36,6 +36,8 @@ async function updateBadge() {
     if (!isVisible(m, trackedIds, enabledIds)) return false;
     if (localIsoDate(new Date(m.utcDate)) !== todayStr) return false;
     if (m.status === "FINISHED") return false;
+    // Cache may be stale — if kickoff was >120 min ago assume the match is over.
+    if (Date.now() - new Date(m.utcDate).getTime() > 120 * 60 * 1000) return false;
     return true;
   });
 
@@ -151,12 +153,12 @@ async function checkNotifications() {
 // the popup's own fetch.
 // Returns true if it wrote a fresh cache, false otherwise (no teams, cache
 // still fresh, empty fetch, or the tracked set changed mid-fetch).
-async function refreshMatches(force = false) {
+async function refreshMatches() {
   const { trackedTeamIds } = await chrome.storage.local.get("trackedTeamIds");
   const teamIds = Array.isArray(trackedTeamIds) ? trackedTeamIds : [];
   if (teamIds.length === 0) return false;
 
-  if (!force && await loadCache(teamIds)) return false; // cache is present and fresh
+  if (await loadCache(teamIds)) return false; // cache is present and fresh
 
   // Start from cached team records if present, else bare id records. We never
   // call /v4/teams/{id} here — it 403s for clubs in restricted competitions.
@@ -182,10 +184,10 @@ async function refreshMatches(force = false) {
 }
 
 // Refresh data, then update the badge/tooltip and fire any due notifications.
-async function refreshAndUpdate(force = false) {
+async function refreshAndUpdate() {
   let wrote = false;
   try {
-    wrote = await refreshMatches(force);
+    wrote = await refreshMatches();
   } catch (err) {
     console.error("refreshMatches failed:", err);
   }
@@ -203,8 +205,9 @@ async function refreshAndUpdate(force = false) {
 function ensureAlarms() {
   // Fetch fresh match data every 6 hours. Fixtures change slowly and the
   // 1-minute tick keeps the badge current from cache (incl. midnight), so this
-  // stays well clear of the API rate limit. During live matches the
-  // checkNotifications alarm triggers a forced refresh every ~5 min instead.
+  // stays well clear of the API rate limit. Trade-off: if the popup is never
+  // opened, cached data can lag reality by up to ~6 hours — the badge handles
+  // this by dropping matches whose kickoff was >120 min ago.
   // Clear before re-creating so a period change takes effect immediately
   // rather than being silently ignored by chrome.alarms.create.
   chrome.alarms.clear("refreshMatches", () => {
@@ -237,23 +240,9 @@ chrome.runtime.onInstalled.addListener(() => {
 chrome.alarms.onAlarm.addListener((alarm) => {
   // Every 6 hours: refresh the cache from the API, then update badge/notifications.
   if (alarm.name === "refreshMatches") refreshAndUpdate();
-  // Every minute: fire due notifications and keep the badge current across midnight.
-  if (alarm.name === "checkNotifications") {
-    checkNotifications();
-    updateBadge();
-    // If there are live matches in the cache, bypass the 6-hour TTL and refresh
-    // every ~5 minutes so the badge clears promptly when games end.
-    chrome.storage.local.get("matchesCache", (data) => {
-      const mc = data.matchesCache;
-      if (!mc) return;
-      const hasLive = mc.matches?.some(
-        (m) => m.status === "IN_PLAY" || m.status === "PAUSED"
-      );
-      if (hasLive && Date.now() - mc.timestamp > 5 * 60 * 1000) {
-        refreshAndUpdate(true);
-      }
-    });
-  }
+  // Every minute: fire due notifications and keep the badge current across
+  // midnight. No fetch here — that would blow the API rate limit.
+  if (alarm.name === "checkNotifications") { checkNotifications(); updateBadge(); }
 });
 
 // Update badge immediately whenever the popup writes new match or team data.
