@@ -36,8 +36,7 @@ async function updateBadge() {
     if (!isVisible(m, trackedIds, enabledIds)) return false;
     if (localIsoDate(new Date(m.utcDate)) !== todayStr) return false;
     if (m.status === "FINISHED") return false;
-    // Cache may be stale — if kickoff was >120 min ago assume the match is over.
-    if (Date.now() - new Date(m.utcDate).getTime() > 120 * 60 * 1000) return false;
+    if (isKickoffExpired(m.utcDate)) return false;
     return true;
   });
 

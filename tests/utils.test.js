@@ -1,4 +1,4 @@
-const { isoDate, localIsoDate, formatTime, formatDateLabel, dateKey } = require("../utils");
+const { isoDate, localIsoDate, formatTime, formatDateLabel, dateKey, isMatchLive, isKickoffExpired } = require("../utils");
 
 // All tests run with TZ=UTC (set via npm test script)
 
@@ -95,5 +95,67 @@ describe("dateKey", () => {
     const key = dateKey("2026-05-18T15:00:00Z");
     expect(typeof key).toBe("string");
     expect(key.length).toBeGreaterThan(0);
+  });
+});
+
+describe("isKickoffExpired", () => {
+  beforeEach(() => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date("2026-05-18T20:00:00Z"));
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  test("returns false for a kickoff 60 minutes ago", () => {
+    expect(isKickoffExpired("2026-05-18T19:00:00Z")).toBe(false);
+  });
+
+  test("returns false for a kickoff exactly 120 minutes ago", () => {
+    expect(isKickoffExpired("2026-05-18T18:00:00Z")).toBe(false);
+  });
+
+  test("returns true for a kickoff 121 minutes ago", () => {
+    expect(isKickoffExpired("2026-05-18T17:59:00Z")).toBe(true);
+  });
+
+  test("returns true for a kickoff several hours ago", () => {
+    expect(isKickoffExpired("2026-05-18T10:00:00Z")).toBe(true);
+  });
+
+  test("returns false for a future kickoff", () => {
+    expect(isKickoffExpired("2026-05-18T21:00:00Z")).toBe(false);
+  });
+});
+
+describe("isMatchLive", () => {
+  const withLive = { live: { homeScore: 1, awayScore: 0 } };
+  const noLive   = null;
+
+  test("IN_PLAY is live regardless of fotmob data", () => {
+    expect(isMatchLive("IN_PLAY", noLive)).toBe(true);
+    expect(isMatchLive("IN_PLAY", withLive)).toBe(true);
+  });
+
+  test("PAUSED (half-time) is live", () => {
+    expect(isMatchLive("PAUSED", noLive)).toBe(true);
+  });
+
+  test("FINISHED is never live", () => {
+    expect(isMatchLive("FINISHED", withLive)).toBe(false);
+    expect(isMatchLive("FINISHED", noLive)).toBe(false);
+  });
+
+  test("TIMED with FotMob live data is live (stale fd.org cache)", () => {
+    expect(isMatchLive("TIMED", withLive)).toBe(true);
+  });
+
+  test("TIMED without FotMob live data is not live", () => {
+    expect(isMatchLive("TIMED", noLive)).toBe(false);
+  });
+
+  test("SCHEDULED without FotMob live data is not live", () => {
+    expect(isMatchLive("SCHEDULED", noLive)).toBe(false);
   });
 });

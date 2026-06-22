@@ -121,12 +121,8 @@ function renderMatch(match, fotmobData) {
   const fotmobUrl = fotmobData?.url ?? fotmobData;
   const { status, score } = match;
   const isFinished = status === "FINISHED";
-  // Trust FotMob's live flag when the fd.org cache is stale — the match may
-  // have kicked off while the cached status is still TIMED/SCHEDULED.
-  // Guard against FINISHED so a briefly-stale FotMob entry doesn't keep
-  // scheduleLiveRefresh running after the match ends.
-  const isLive     = status === "IN_PLAY" || (!isFinished && fotmobData?.live != null);
   const isHalfTime = status === "PAUSED";
+  const isLive     = !isHalfTime && isMatchLive(status, fotmobData);
 
   const row = document.createElement("div");
   row.className = "match-row";
@@ -215,7 +211,7 @@ async function renderMatches(matches) {
   const todayCount = visible.filter((m) => {
     if (localIsoDate(new Date(m.utcDate)) !== todayStr) return false;
     if (m.status === "FINISHED") return false;
-    if (Date.now() - new Date(m.utcDate).getTime() > 120 * 60 * 1000) return false;
+    if (isKickoffExpired(m.utcDate)) return false;
     return true;
   }).length;
   chrome.action.setBadgeText({ text: todayCount > 0 ? String(todayCount) : "" });
@@ -271,10 +267,7 @@ async function renderMatches(matches) {
         }
       }
       const fData = getFotmobData(match, fotmobMap);
-      const s = match.status;
-      if (s === "IN_PLAY" || s === "PAUSED" || (s !== "FINISHED" && fData?.live != null)) {
-        anyLive = true;
-      }
+      if (isMatchLive(match.status, fData)) anyLive = true;
       fragment.appendChild(renderMatch(match, fData));
     }
     return anchor;
