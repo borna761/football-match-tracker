@@ -212,9 +212,12 @@ async function renderMatches(matches) {
   const todayStr = localIsoDate(new Date());
   const visible  = filterMatches(matches, todayStr, TRACKED_IDS, enabledTeamIds);
 
-  const todayCount = visible.filter(
-    (m) => localIsoDate(new Date(m.utcDate)) === todayStr && m.status !== "FINISHED"
-  ).length;
+  const todayCount = visible.filter((m) => {
+    if (localIsoDate(new Date(m.utcDate)) !== todayStr) return false;
+    if (m.status === "FINISHED") return false;
+    if (Date.now() - new Date(m.utcDate).getTime() > 120 * 60 * 1000) return false;
+    return true;
+  }).length;
   chrome.action.setBadgeText({ text: todayCount > 0 ? String(todayCount) : "" });
   chrome.action.setBadgeBackgroundColor({ color: "#f97316" });
 
@@ -363,17 +366,21 @@ function showError(msg) {
 let _liveTimer  = null;
 let _lastMatches = null;
 
-async function scheduleLiveRefresh(cachedMatches) {
+async function scheduleLiveRefresh() {
   clearTimeout(_liveTimer);
   _liveTimer = setTimeout(async () => {
     try {
-      const stillLive = await renderMatches(cachedMatches);
-      if (stillLive) scheduleLiveRefresh(cachedMatches);
-    } catch { /* silently skip failed live refresh */ }
+      // Suppress error UI on live-refresh ticks — a transient failure should
+      // keep the existing match display intact, not replace it with an error.
+      // load() rethrows when suppressError is true so we can re-arm below.
+      await load(true);
+    } catch {
+      scheduleLiveRefresh(); // re-arm even on failure so the loop survives blips
+    }
   }, 30_000);
 }
 
-async function load() {
+async function load(suppressError = false) {
   clearTimeout(_liveTimer);
   try {
     let cache = await loadCache(TEAM_IDS);
@@ -392,9 +399,10 @@ async function load() {
     }
     _lastMatches = cache.matches;
     const hasLive = await renderMatches(cache.matches);
-    if (hasLive) scheduleLiveRefresh(cache.matches);
+    if (hasLive) scheduleLiveRefresh();
   } catch (err) {
-    showError(`Failed to load: ${err.message}`);
+    if (!suppressError) showError(`Failed to load: ${err.message}`);
+    throw err;
   }
 }
 
@@ -422,7 +430,7 @@ if (typeof document !== "undefined") {
       healTeams(matchCache.matches); // fill in any placeholder names from cached data
       _lastMatches = matchCache.matches;
       const hasLive = await renderMatches(matchCache.matches);
-      if (hasLive) scheduleLiveRefresh(matchCache.matches);
+      if (hasLive) scheduleLiveRefresh();
 
       // Re-fetch in background if stale (don't show spinner)
       if (Date.now() - matchCache.timestamp >= CACHE_TTL_MS) {
@@ -432,7 +440,7 @@ if (typeof document !== "undefined") {
           healTeams(fresh);
           _lastMatches = cache.matches;
           const stillLive = await renderMatches(cache.matches);
-          if (stillLive) scheduleLiveRefresh(cache.matches);
+          if (stillLive) scheduleLiveRefresh();
           else clearTimeout(_liveTimer);
         }
       }

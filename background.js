@@ -36,6 +36,8 @@ async function updateBadge() {
     if (!isVisible(m, trackedIds, enabledIds)) return false;
     if (localIsoDate(new Date(m.utcDate)) !== todayStr) return false;
     if (m.status === "FINISHED") return false;
+    // Cache may be stale — if kickoff was >120 min ago assume the match is over.
+    if (Date.now() - new Date(m.utcDate).getTime() > 120 * 60 * 1000) return false;
     return true;
   });
 
@@ -204,9 +206,16 @@ function ensureAlarms() {
   // Fetch fresh match data every 6 hours. Fixtures change slowly and the
   // 1-minute tick keeps the badge current from cache (incl. midnight), so this
   // stays well clear of the API rate limit. Trade-off: if the popup is never
-  // opened, cached data can lag reality by up to ~6 hours.
-  chrome.alarms.create("refreshMatches",     { periodInMinutes: 360 });
-  chrome.alarms.create("checkNotifications", { periodInMinutes:   1 });
+  // opened, cached data can lag reality by up to ~6 hours — the badge handles
+  // this by dropping matches whose kickoff was >120 min ago.
+  // Clear before re-creating so a period change takes effect immediately
+  // rather than being silently ignored by chrome.alarms.create.
+  chrome.alarms.clear("refreshMatches", () => {
+    chrome.alarms.create("refreshMatches", { periodInMinutes: 360 });
+  });
+  chrome.alarms.clear("checkNotifications", () => {
+    chrome.alarms.create("checkNotifications", { periodInMinutes: 1 });
+  });
 }
 
 // Update badge when the browser starts

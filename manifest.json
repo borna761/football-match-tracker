@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Football Match Tracker",
-  "version": "2.3",
+  "version": "2.4",
   "description": "Upcoming matches for your favorite teams",
   "background": {
     "service_worker": "background.js"
