@@ -38,6 +38,14 @@ describe("normalizeTeam", () => {
   test("handles a long name like FC Internazionale Milano", () => {
     expect(normalizeTeam("FC Internazionale Milano")).toBe("internazionalemilano");
   });
+
+  test("returns empty string for null (fd.org occasionally omits team names)", () => {
+    expect(normalizeTeam(null)).toBe("");
+  });
+
+  test("returns empty string for undefined", () => {
+    expect(normalizeTeam(undefined)).toBe("");
+  });
 });
 
 // ── _namesMatch ───────────────────────────────────────────────────────────────
