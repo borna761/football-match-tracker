@@ -77,6 +77,7 @@ function _fotmobToken(apiPath) {
 
 // ── Team name normalisation ───────────────────────────────────────────────────
 function normalizeTeam(name) {
+  if (!name) return "";
   return name
     .toLowerCase()
     .replace(/\b(fc|afc|cf|sc|ac|bsc|fk|rb)\b\.?\s*/g, "")
