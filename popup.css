@@ -21,7 +21,7 @@
 
 @media (prefers-color-scheme: light) {
   :root {
-    --bg: #ffffff;
+    --bg: #f8f8f8;
     --bg-hover: rgba(0, 0, 0, 0.03);
     --border: rgba(0, 0, 0, 0.08);
     --border-subtle: rgba(0, 0, 0, 0.06);
@@ -220,8 +220,6 @@ body {
   height: 24px;
   object-fit: contain;
   flex-shrink: 0;
-  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.08);
-  border-radius: 2px;
 }
 
 .team-logo-placeholder {
