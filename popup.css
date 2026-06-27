@@ -220,6 +220,9 @@ body {
   height: 24px;
   object-fit: contain;
   flex-shrink: 0;
+  background: #f0f0f0;
+  border-radius: 50%;
+  padding: 1px;
 }
 
 .team-logo-placeholder {
