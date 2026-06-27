@@ -21,7 +21,7 @@
 
 @media (prefers-color-scheme: light) {
   :root {
-    --bg: #ffffff;
+    --bg: #fafafa;
     --bg-hover: rgba(0, 0, 0, 0.03);
     --border: rgba(0, 0, 0, 0.08);
     --border-subtle: rgba(0, 0, 0, 0.06);
