@@ -245,76 +245,105 @@ async function renderMatches(matches) {
   chrome.action.setBadgeText({ text: todayCount > 0 ? String(todayCount) : "" });
   chrome.action.setBadgeBackgroundColor({ color: "#f97316" });
 
-  const fotmobMap = visible.length > 0
-    ? await fetchFotmobUrls([...new Set(visible.map((m) => isoDate(new Date(m.utcDate))))])
-    : {};
-
-  const fragment = document.createDocumentFragment();
-
-  if (visible.length === 0) {
-    const el = document.createElement("div");
-    el.className = "no-matches";
-    el.textContent = TEAM_IDS.length === 0
-      ? "No teams tracked. Use the ⚙ settings to add teams."
-      : "No upcoming matches in the next 60 days.";
-    fragment.appendChild(el);
-    container.innerHTML = "";
-    container.appendChild(fragment);
-    return false;
-  }
-
   const today    = visible.filter((m) => localIsoDate(new Date(m.utcDate)) === todayStr);
   const upcoming = visible.filter((m) => localIsoDate(new Date(m.utcDate)) >  todayStr);
 
-  let anyLive = false;
+  // Paints the list using the given FotMob enrichment map (possibly empty)
+  // and returns whether anything is currently live. `scroll` controls
+  // whether to scroll to the first section on this paint.
+  function paint(fotmobMap, scroll) {
+    const fragment = document.createDocumentFragment();
 
-  function appendSection(label, sectionMatches, { subgroups = false } = {}) {
-    if (sectionMatches.length === 0) return null;
-    let anchor = null;
-    if (label) {
-      const header = document.createElement("div");
-      header.className = "section-header";
-      header.textContent = label;
-      fragment.appendChild(header);
-      anchor = header;
+    if (visible.length === 0) {
+      const el = document.createElement("div");
+      el.className = "no-matches";
+      el.textContent = TEAM_IDS.length === 0
+        ? "No teams tracked. Use the ⚙ settings to add teams."
+        : "No upcoming matches in the next 60 days.";
+      fragment.appendChild(el);
+      container.innerHTML = "";
+      container.appendChild(fragment);
+      return false;
     }
-    let currentKey = null;
-    for (const match of sectionMatches) {
-      if (subgroups) {
-        const key = dateKey(match.utcDate);
-        if (key !== currentKey) {
-          currentKey = key;
-          const group = document.createElement("div");
-          group.className = "date-group";
-          const span = document.createElement("span");
-          span.className = "date-label";
-          span.textContent = formatDateLabel(match.utcDate);
-          group.appendChild(span);
-          fragment.appendChild(group);
-          if (!anchor) anchor = group;
-        }
+
+    let anyLive = false;
+
+    function appendSection(label, sectionMatches, { subgroups = false } = {}) {
+      if (sectionMatches.length === 0) return null;
+      let anchor = null;
+      if (label) {
+        const header = document.createElement("div");
+        header.className = "section-header";
+        header.textContent = label;
+        fragment.appendChild(header);
+        anchor = header;
       }
-      const fData = getFotmobData(match, fotmobMap);
-      if (isMatchInProgress(match.status, fData)) anyLive = true;
-      fragment.appendChild(renderMatch(match, fData));
+      let currentKey = null;
+      for (const match of sectionMatches) {
+        if (subgroups) {
+          const key = dateKey(match.utcDate);
+          if (key !== currentKey) {
+            currentKey = key;
+            const group = document.createElement("div");
+            group.className = "date-group";
+            const span = document.createElement("span");
+            span.className = "date-label";
+            span.textContent = formatDateLabel(match.utcDate);
+            group.appendChild(span);
+            fragment.appendChild(group);
+            if (!anchor) anchor = group;
+          }
+        }
+        const fData = getFotmobData(match, fotmobMap);
+        if (isMatchInProgress(match.status, fData)) anyLive = true;
+        fragment.appendChild(renderMatch(match, fData));
+      }
+      return anchor;
     }
-    return anchor;
+
+    const todayHeader    = appendSection("Today", today);
+    const upcomingAnchor = appendSection(null, upcoming, { subgroups: true });
+
+    container.innerHTML = "";
+    container.appendChild(fragment);
+
+    if (scroll) {
+      const scrollTarget = todayHeader ?? upcomingAnchor;
+      if (scrollTarget) {
+        requestAnimationFrame(() => scrollTarget.scrollIntoView({ block: "start" }));
+      }
+    }
+
+    return anyLive;
   }
 
-  const todayHeader    = appendSection("Today", today);
-  const upcomingAnchor = appendSection(null, upcoming, { subgroups: true });
+  if (visible.length === 0) return paint({}, !isRefresh);
 
-  container.innerHTML = "";
-  container.appendChild(fragment);
-
+  // On the very first paint (nothing shown yet — the popup's static loading
+  // state is still up), paint immediately using whatever fd.org itself
+  // already reports (scheduled times, final scores for finished matches)
+  // rather than blocking on FotMob's live-score/link enrichment first.
+  // fetchFotmobUrls always fetches today's date fresh — never cached, see
+  // fotmob.js — so it's a real network round-trip on every popup open
+  // regardless of how fresh matchesCache is. Once it resolves, repaint with
+  // enrichment applied. Re-renders of an already-painted view (live-refresh
+  // ticks, background SWR updates) skip this: discarding an already-enriched
+  // live score to briefly show an un-enriched one would be a visible
+  // regression, not an improvement, so they wait for the real fetch as before.
   if (!isRefresh) {
-    const scrollTarget = todayHeader ?? upcomingAnchor;
-    if (scrollTarget) {
-      requestAnimationFrame(() => scrollTarget.scrollIntoView({ block: "start" }));
-    }
+    const hasLive = paint({}, true);
+    fetchFotmobUrls([...new Set(visible.map((m) => isoDate(new Date(m.utcDate))))])
+      .then((fotmobMap) => {
+        const stillLive = paint(fotmobMap, false);
+        if (stillLive) scheduleLiveRefresh();
+        else clearTimeout(_liveTimer);
+      })
+      .catch((err) => console.error("fetchFotmobUrls failed:", err));
+    return hasLive;
   }
 
-  return anyLive;
+  const fotmobMap = await fetchFotmobUrls([...new Set(visible.map((m) => isoDate(new Date(m.utcDate))))]);
+  return paint(fotmobMap, false);
 }
 
 function renderCrests() {
