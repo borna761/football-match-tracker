@@ -142,23 +142,11 @@ function teamsFromMatches(teams, matches) {
   });
 }
 
+// Fetches a competition's roster once; both the Settings browse UI (needs
+// display fields) and the competition-resolution sweep (needs just
+// membership + rate-limit headers to throttle) derive what they need from
+// the same response rather than issuing the same request twice.
 async function fetchCompTeams(code) {
-  const res = await fetch(`https://api.football-data.org/v4/competitions/${code}/teams`, {
-    headers: { "X-Auth-Token": API_KEY },
-  });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  const json = await res.json();
-  return (json.teams || []).map((t) => ({
-    id:        t.id,
-    name:      t.name,
-    shortName: t.shortName,
-    crest:     t.crest,
-  }));
-}
-
-// Fetch just the team ids on a competition's roster — cheaper than
-// fetchCompTeams for resolveTeamCompetitions, which only needs membership.
-async function fetchCompTeamIds(code) {
   const res = await fetch(`https://api.football-data.org/v4/competitions/${code}/teams`, {
     headers: { "X-Auth-Token": API_KEY },
   });
@@ -166,7 +154,13 @@ async function fetchCompTeamIds(code) {
   const json = await res.json();
   const remaining = parseInt(res.headers.get("X-Requests-Available-Minute") ?? "10", 10);
   const resetSecs = parseInt(res.headers.get("X-RequestCounter-Reset") ?? "0", 10);
-  return { ids: new Set((json.teams || []).map((t) => t.id)), remaining, resetSecs };
+  const teams = (json.teams || []).map((t) => ({
+    id:        t.id,
+    name:      t.name,
+    shortName: t.shortName,
+    crest:     t.crest,
+  }));
+  return { teams, remaining, resetSecs };
 }
 
 // Given a target team id and a map of {competitionCode: Set<teamId>} rosters,
@@ -191,8 +185,8 @@ async function resolveTeamCompetitions(id) {
   const rostersByCode = {};
   for (const code of FREE_COMP_CODES) {
     try {
-      const { ids, remaining, resetSecs } = await fetchCompTeamIds(code);
-      rostersByCode[code] = ids;
+      const { teams, remaining, resetSecs } = await fetchCompTeams(code);
+      rostersByCode[code] = new Set(teams.map((t) => t.id));
       if (remaining <= 1 && resetSecs > 0) {
         await new Promise((r) => setTimeout(r, resetSecs * 1000 + 200));
       }

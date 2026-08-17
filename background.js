@@ -228,7 +228,8 @@ async function continueCompetitionSweep() {
   while (queue.length > 0) {
     const { teamId, code } = queue[0];
     try {
-      const { ids, remaining, resetSecs } = await fetchCompTeamIds(code);
+      const { teams, remaining, resetSecs } = await fetchCompTeams(code);
+      const ids = new Set(teams.map((t) => t.id));
       results = recordSweepResult(results, teamId, code, ids.has(teamId));
       queue = queue.slice(1);
       await chrome.storage.local.set({ compSweepState: { teamIds, queue, results } });
@@ -245,7 +246,16 @@ async function continueCompetitionSweep() {
   }
 
   // Queue fully drained — merge results into the durable team records.
-  const teams = await loadTeams(teamIds);
+  // Re-read trackedTeamIds now rather than trusting the sweep's teamIds
+  // snapshot from when it started: a sweep can span several minutes (it did,
+  // live — 7-8 for 7 teams), long enough for a team to be added or removed
+  // via Settings in the meantime. saveTeams fully overwrites teamsCache.teams,
+  // so using the stale snapshot would silently wipe a newly-added team's
+  // record or resurrect a removed one. A team added mid-sweep simply has no
+  // entry in results and comes through applyResolvedCompetitions unchanged —
+  // its own addTeam call already resolved it correctly.
+  const { trackedTeamIds: currentTeamIds } = await chrome.storage.local.get("trackedTeamIds");
+  const teams = await loadTeams(Array.isArray(currentTeamIds) ? currentTeamIds : []);
   const updated = teams.map((t) => applyResolvedCompetitions(t, results[t.id] || []));
   saveTeams(updated);
   await chrome.storage.local.remove("compSweepState");

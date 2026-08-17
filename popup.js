@@ -19,19 +19,19 @@ async function readRawMatchCache() {
 async function addTeam(id, knownInfo) {
   if (TEAM_IDS.includes(id)) return;
 
-  // See resolveTeamCompetitions (api.js) for why this — rather than the
-  // single competition knownInfo was browsed from, or a team-info fetch — is
-  // the only reliable source for a team's full competition list. A team that
-  // resolves to zero competitions (e.g. total network failure) falls back to
-  // the existing "unresolved team" sweep on the next refresh.
-  const competitions = await resolveTeamCompetitions(id);
+  // Add immediately with an empty competitions list rather than awaiting
+  // resolveTeamCompetitions here — it needs up to 11 requests, which always
+  // exceeds fd.org's 10/min budget, so it can take close to a minute on
+  // nearly every add. Blocking the caller (the Settings "Add" button) on
+  // that isn't acceptable; the full list is resolved and patched in by
+  // resolveAndMergeTeamCompetitions below without blocking anything.
   const info = {
     id,
     name:      knownInfo.name,
     shortName: knownInfo.shortName,
     crest:     knownInfo.crest,
-    competitions,
-    national:  competitions.some((c) => NATIONAL_COMP_CODES.has(c)),
+    competitions: [],
+    national:  false,
   };
 
   TEAM_IDS.push(id);
@@ -42,31 +42,56 @@ async function addTeam(id, knownInfo) {
   saveTrackedIds();
   saveEnabledTeams();
   saveTeams(TEAMS);
+  renderCrests();
+
+  resolveAndMergeTeamCompetitions(id);
+}
+
+// Resolves a newly-added team's full competition list in the background —
+// see resolveTeamCompetitions (api.js) for why this needs a roster sweep
+// rather than a single request — then patches it into TEAMS/teamsCache and
+// fetches/merges its matches. Deliberately not awaited by addTeam; errors
+// are logged, not thrown, since nothing is waiting on this to resolve.
+async function resolveAndMergeTeamCompetitions(id) {
+  let competitions;
+  try {
+    competitions = await resolveTeamCompetitions(id);
+  } catch (err) {
+    console.error("resolveTeamCompetitions failed:", err);
+    return;
+  }
+
+  // Re-find by id rather than trusting an index captured before this await —
+  // the team may have been removed while the resolve was in flight.
+  const idx = TEAMS.findIndex((t) => t.id === id);
+  if (idx === -1) return;
+  TEAMS[idx] = { ...TEAMS[idx], competitions, national: competitions.some((c) => NATIONAL_COMP_CODES.has(c)) };
+  saveTeams(TEAMS);
+  renderCrests();
+
+  // Competitions unknown (e.g. total network failure) — fetchAllMatches
+  // would sweep all 11 competitions just for this one team; let the next
+  // full refresh's "unresolved team" fallback pick it up instead.
+  if (competitions.length === 0) return;
 
   // Fetch only this team's matches and merge into the existing cache so we
-  // don't need to re-fetch every other team again. Skip when the team's
-  // competitions are unknown (resolveTeamCompetitions found none) —
-  // fetchAllMatches would then sweep all 11 competitions just for this one
-  // add; let the next full refresh pick it up instead.
+  // don't need to re-fetch every other team again.
   const existing = await readRawMatchCache();
-  if (existing && info.competitions && info.competitions.length) {
-    try {
-      const fresh = await fetchAllMatches([info]);
-      const seen = new Set(existing.matches.map((m) => m.id));
-      const merged = [...existing.matches];
-      for (const m of fresh) {
-        if (!seen.has(m.id)) merged.push(m);
-      }
-      merged.sort((a, b) => new Date(a.utcDate) - new Date(b.utcDate));
-      saveCache(merged, TEAM_IDS); // re-signs with updated fingerprint (new TEAM_IDS)
-    } catch {
-      // Fetch failed — clear so load() starts fresh on next open
-      chrome.storage.local.remove("matchesCache");
-    }
-  }
-  // No existing cache — leave it absent so load() does a full fetch naturally
+  if (!existing) return; // no existing cache — leave it absent so load() does a full fetch naturally
 
-  renderCrests();
+  try {
+    const fresh = await fetchAllMatches([TEAMS[idx]]);
+    const seen = new Set(existing.matches.map((m) => m.id));
+    const merged = [...existing.matches];
+    for (const m of fresh) {
+      if (!seen.has(m.id)) merged.push(m);
+    }
+    merged.sort((a, b) => new Date(a.utcDate) - new Date(b.utcDate));
+    saveCache(merged, TEAM_IDS); // re-signs with updated fingerprint (new TEAM_IDS)
+  } catch {
+    // Fetch failed — clear so load() starts fresh on next open
+    chrome.storage.local.remove("matchesCache");
+  }
 }
 
 function removeTeam(id) {
