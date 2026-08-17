@@ -19,16 +19,18 @@ async function readRawMatchCache() {
 async function addTeam(id, knownInfo = null) {
   if (TEAM_IDS.includes(id)) return;
 
-  // We need the team's competition list to fetch its matches. Settings passes
-  // knownInfo from the competition browser, which lacks it, so fetch full team
-  // info whenever competitions are missing.
-  let info = knownInfo;
-  if (!info || !info.competitions) {
-    try {
-      info = await fetchTeamInfo(id);
-    } catch {
-      info = { id, name: String(id), shortName: String(id), crest: null, national: false, competitions: [] };
-    }
+  // We need the team's full competition list to fetch its matches. Settings
+  // passes knownInfo from the competition browser, but that only records the
+  // single competition it was browsed from (see fetchCompTeams) — a club in
+  // both its domestic league and a continental competition would otherwise
+  // never get its domestic matches fetched. Always try the full team-info
+  // endpoint; fall back to knownInfo (or a bare placeholder) since it 403s
+  // for some clubs.
+  let info;
+  try {
+    info = await fetchTeamInfo(id);
+  } catch {
+    info = knownInfo || { id, name: String(id), shortName: String(id), crest: null, national: false, competitions: [] };
   }
 
   TEAM_IDS.push(id);
