@@ -182,21 +182,80 @@ async function refreshMatches() {
   return true; // wrote a new cache
 }
 
-// Re-resolve every tracked team's competitions from roster membership (see
-// resolveTeamCompetitions/applyResolvedCompetitions in api.js) and persist
-// the result. A team's competition portfolio can settle in after it was
-// added — e.g. a club's Champions League slot, confirmed by roster but with
-// no fixtures published yet at add-time — so this catches that without
-// requiring the user to remove and re-add the team.
-async function refreshCompetitions() {
+// ── Competition sweep ─────────────────────────────────────────────────────────
+// Re-resolves every tracked team's competitions from roster membership (see
+// buildSweepQueue/recordSweepResult/applyResolvedCompetitions in api.js), so a
+// competition confirmed after a team was added — e.g. a club's Champions
+// League slot, confirmed by roster but with no fixtures published yet at
+// add-time — gets picked up without the user needing to remove and re-add
+// the team.
+//
+// This can't safely run as one long function with in-process throttle
+// sleeps: a bare setTimeout doesn't count as activity, and Chrome can (and,
+// confirmed live, does) terminate the service worker mid-sleep — discarding
+// all progress, since nothing was being saved until the very end. Instead,
+// progress (compSweepState: {teamIds, queue, results}) is persisted to
+// storage after every single check, and the throttle pause uses
+// chrome.alarms — which reliably wakes a terminated worker back up at the
+// scheduled time — instead of setTimeout. A kill at any point loses at most
+// one in-flight request, not the whole sweep.
+
+// Initialize sweep state for all tracked teams if none is already in
+// progress. No-ops if a sweep is already running so a second trigger (e.g.
+// reload while the weekly sweep is mid-pause) doesn't reset its progress.
+async function startCompetitionSweep() {
+  const { compSweepState } = await chrome.storage.local.get("compSweepState");
+  if (compSweepState) return;
+
   const { trackedTeamIds } = await chrome.storage.local.get("trackedTeamIds");
   const teamIds = Array.isArray(trackedTeamIds) ? trackedTeamIds : [];
   if (teamIds.length === 0) return;
 
-  const teams = await loadTeams(teamIds);
-  if (!teams) return; // nothing cached yet — the next add/refresh will populate it
+  await chrome.storage.local.set({
+    compSweepState: { teamIds, queue: buildSweepQueue(teamIds), results: {} },
+  });
+}
 
-  saveTeams(await refreshTeamCompetitions(teams));
+// Process as much of the sweep queue as fits before the next throttle pause,
+// persisting state after every step. Safe to call repeatedly — a completed
+// or nonexistent sweep is a no-op.
+async function continueCompetitionSweep() {
+  const { compSweepState } = await chrome.storage.local.get("compSweepState");
+  if (!compSweepState) return;
+
+  let { teamIds, queue, results } = compSweepState;
+
+  while (queue.length > 0) {
+    const { teamId, code } = queue[0];
+    try {
+      const { ids, remaining, resetSecs } = await fetchCompTeamIds(code);
+      results = recordSweepResult(results, teamId, code, ids.has(teamId));
+      queue = queue.slice(1);
+      await chrome.storage.local.set({ compSweepState: { teamIds, queue, results } });
+
+      if (remaining <= 1 && resetSecs > 0) {
+        chrome.alarms.create("competitionSweepResume", { delayInMinutes: Math.max(1, Math.ceil((resetSecs + 1) / 60)) });
+        return;
+      }
+    } catch (err) {
+      console.warn(`Skipping roster ${code} for team ${teamId}:`, err.message);
+      queue = queue.slice(1);
+      await chrome.storage.local.set({ compSweepState: { teamIds, queue, results } });
+    }
+  }
+
+  // Queue fully drained — merge results into the durable team records.
+  const teams = await loadTeams(teamIds);
+  saveTeams(teams.map((t) => applyResolvedCompetitions(t, results[t.id] || [])));
+  await chrome.storage.local.remove("compSweepState");
+}
+
+// Start a sweep if one isn't already running, then make progress on it right
+// away rather than waiting for the next scheduled alarm. Used by the weekly
+// alarm and on install/reload.
+async function kickCompetitionSweep() {
+  await startCompetitionSweep();
+  await continueCompetitionSweep();
 }
 
 // Refresh data, then update the badge/tooltip and fire any due notifications.
@@ -234,7 +293,7 @@ function ensureAlarms() {
   });
   // Re-resolve tracked teams' competitions weekly. A team's portfolio settles
   // in once a season (e.g. a continental competition's draw), not
-  // continuously, so this is plenty — see refreshCompetitions.
+  // continuously, so this is plenty — see kickCompetitionSweep.
   chrome.alarms.clear("refreshCompetitions", () => {
     chrome.alarms.create("refreshCompetitions", { periodInMinutes: 7 * 24 * 60 });
   });
@@ -264,7 +323,7 @@ chrome.runtime.onInstalled.addListener(() => {
   // week for its first automatic sweep. Run once on install/reload too, but
   // not on onStartup — that fires on every browser launch, far more often
   // than the "once a season" cadence this actually needs.
-  refreshCompetitions().catch((err) => console.error("refreshCompetitions failed:", err));
+  kickCompetitionSweep().catch((err) => console.error("kickCompetitionSweep failed:", err));
 });
 
 chrome.alarms.onAlarm.addListener((alarm) => {
@@ -273,9 +332,14 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   // Every minute: fire due notifications and keep the badge current across
   // midnight. No fetch here — that would blow the API rate limit.
   if (alarm.name === "checkNotifications") { checkNotifications(); updateBadge(); }
-  // Weekly: re-resolve tracked teams' competitions from roster membership.
+  // Weekly: start a fresh competition sweep for all tracked teams.
   if (alarm.name === "refreshCompetitions") {
-    refreshCompetitions().catch((err) => console.error("refreshCompetitions failed:", err));
+    kickCompetitionSweep().catch((err) => console.error("kickCompetitionSweep failed:", err));
+  }
+  // One-time, scheduled dynamically: resume a sweep paused on fd.org's
+  // per-minute throttle. See continueCompetitionSweep.
+  if (alarm.name === "competitionSweepResume") {
+    continueCompetitionSweep().catch((err) => console.error("continueCompetitionSweep failed:", err));
   }
 });
 

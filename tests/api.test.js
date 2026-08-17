@@ -1,4 +1,4 @@
-const { teamsFromMatches, matchingCompetitions, applyResolvedCompetitions } = require("../api");
+const { teamsFromMatches, matchingCompetitions, applyResolvedCompetitions, buildSweepQueue, recordSweepResult } = require("../api");
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -159,5 +159,63 @@ describe("applyResolvedCompetitions", () => {
     expect(updated.name).toBe("FC Barcelona");
     expect(updated.shortName).toBe("Barça");
     expect(updated.crest).toBe("barca.png");
+  });
+});
+
+// ── buildSweepQueue / recordSweepResult ───────────────────────────────────────
+// The background competition sweep (background.js) can't safely run as one
+// long function with in-process throttle sleeps — a bare setTimeout doesn't
+// count as activity, so Chrome can (and, confirmed live, does) terminate the
+// service worker mid-sleep, discarding all progress since nothing gets saved
+// until the very end. The fix makes the sweep resumable: a flat queue of
+// (team, competition) pairs persisted in chrome.storage, processed a few at a
+// time, with chrome.alarms (which reliably wakes a terminated worker) used
+// for the throttle pause instead of setTimeout. These two functions are the
+// pure state-transition core of that queue; the storage/alarm/fetch wiring
+// around them isn't unit tested, consistent with the rest of this codebase.
+
+describe("buildSweepQueue", () => {
+  test("produces one entry per team per free-tier competition", () => {
+    const queue = buildSweepQueue([81, 108]);
+    expect(queue).toHaveLength(2 * 11);
+  });
+
+  test("orders by team first, then competition, so one team's checks finish before the next starts", () => {
+    const queue = buildSweepQueue([81, 108]);
+    expect(queue[0]).toEqual({ teamId: 81, code: "PL" });
+    expect(queue[10]).toEqual({ teamId: 81, code: "PPL" });
+    expect(queue[11]).toEqual({ teamId: 108, code: "PL" });
+  });
+
+  test("returns an empty queue for no teams", () => {
+    expect(buildSweepQueue([])).toEqual([]);
+  });
+});
+
+describe("recordSweepResult", () => {
+  test("adds the competition to a team's result list when matched", () => {
+    const results = recordSweepResult({}, 81, "PD", true);
+    expect(results).toEqual({ 81: ["PD"] });
+  });
+
+  test("leaves results unchanged when not matched", () => {
+    const results = recordSweepResult({ 81: ["CL"] }, 81, "PD", false);
+    expect(results).toEqual({ 81: ["CL"] });
+  });
+
+  test("appends to an existing team's list rather than overwriting it", () => {
+    const results = recordSweepResult({ 81: ["CL"] }, 81, "PD", true);
+    expect(results[81].sort()).toEqual(["CL", "PD"]);
+  });
+
+  test("does not mutate the input results object", () => {
+    const original = { 81: ["CL"] };
+    recordSweepResult(original, 81, "PD", true);
+    expect(original).toEqual({ 81: ["CL"] });
+  });
+
+  test("does not duplicate a competition already recorded for that team", () => {
+    const results = recordSweepResult({ 81: ["PD"] }, 81, "PD", true);
+    expect(results[81]).toEqual(["PD"]);
   });
 });

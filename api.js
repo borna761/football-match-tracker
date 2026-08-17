@@ -217,21 +217,33 @@ function applyResolvedCompetitions(team, resolved) {
   };
 }
 
-// Re-resolve every already-tracked team's competitions from roster
-// membership. Run periodically (see background.js) so a competition
-// confirmed after a team was added — e.g. a club's Champions League slot
-// settling in once fd.org publishes the league-phase draw — gets picked up
-// automatically, without the user needing to remove and re-add the team.
-async function refreshTeamCompetitions(teams) {
-  const updated = [];
-  for (const team of teams) {
-    const resolved = await resolveTeamCompetitions(team.id);
-    updated.push(applyResolvedCompetitions(team, resolved));
-  }
-  return updated;
+// Build a flat queue of every (team, competition) roster check the background
+// sweep needs to make. Ordered team-by-team so one team's full result is
+// available as soon as its block of checks finishes, rather than only once
+// the entire queue (all teams) drains. Pure — exported for testing.
+function buildSweepQueue(teamIds) {
+  return teamIds.flatMap((teamId) => FREE_COMP_CODES.map((code) => ({ teamId, code })));
+}
+
+// Record the outcome of one queue item's roster check into the results
+// accumulator. Immutable (returns a new object) and idempotent (checking the
+// same team/code twice doesn't duplicate an entry) so it's safe to call from
+// a resumed sweep that might re-check an item whose prior result wasn't
+// persisted yet. Pure — exported for testing.
+function recordSweepResult(results, teamId, code, matched) {
+  if (!matched) return results;
+  const existing = results[teamId] || [];
+  if (existing.includes(code)) return results;
+  return { ...results, [teamId]: [...existing, code] };
 }
 
 // Pure helpers exported for testing.
 if (typeof module !== "undefined") {
-  module.exports = { teamsFromMatches, matchingCompetitions, applyResolvedCompetitions };
+  module.exports = {
+    teamsFromMatches,
+    matchingCompetitions,
+    applyResolvedCompetitions,
+    buildSweepQueue,
+    recordSweepResult,
+  };
 }
