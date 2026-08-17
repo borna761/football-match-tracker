@@ -259,6 +259,12 @@ chrome.runtime.onInstalled.addListener(() => {
     }
   });
   refreshAndUpdate();
+  // A periodic alarm's first fire is one full period away, not immediate — an
+  // already-tracked team's stale competitions would otherwise wait up to a
+  // week for its first automatic sweep. Run once on install/reload too, but
+  // not on onStartup — that fires on every browser launch, far more often
+  // than the "once a season" cadence this actually needs.
+  refreshCompetitions().catch((err) => console.error("refreshCompetitions failed:", err));
 });
 
 chrome.alarms.onAlarm.addListener((alarm) => {
