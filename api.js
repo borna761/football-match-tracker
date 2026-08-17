@@ -180,7 +180,26 @@ async function fetchCompTeams(code) {
   }));
 }
 
-// Pure helper exported for testing.
+// Merge the browser-sourced team record (knownInfo, if any — records only the
+// single competition it was browsed from, see fetchCompTeams) with a full
+// team-info fetch. Neither source alone is reliable: knownInfo only has one
+// competition, and team-info's runningCompetitions only reflects competitions
+// with fixtures fd.org has already scheduled — a team confirmed in e.g. next
+// season's Champions League bracket without published fixtures yet won't show
+// CL there. Union both so a confirmed competition is never lost. Pure —
+// exported for testing.
+function mergeTeamInfo(knownInfo, full) {
+  const competitions = [...new Set([...(knownInfo?.competitions || []), ...full.competitions])];
+  return {
+    ...full,
+    competitions,
+    // Recompute from the merged list rather than trusting full.national alone,
+    // for the same reason as above.
+    national: full.national || competitions.some((c) => NATIONAL_COMP_CODES.has(c)),
+  };
+}
+
+// Pure helpers exported for testing.
 if (typeof module !== "undefined") {
-  module.exports = { teamsFromMatches };
+  module.exports = { teamsFromMatches, mergeTeamInfo };
 }
