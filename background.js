@@ -182,6 +182,23 @@ async function refreshMatches() {
   return true; // wrote a new cache
 }
 
+// Re-resolve every tracked team's competitions from roster membership (see
+// resolveTeamCompetitions/applyResolvedCompetitions in api.js) and persist
+// the result. A team's competition portfolio can settle in after it was
+// added — e.g. a club's Champions League slot, confirmed by roster but with
+// no fixtures published yet at add-time — so this catches that without
+// requiring the user to remove and re-add the team.
+async function refreshCompetitions() {
+  const { trackedTeamIds } = await chrome.storage.local.get("trackedTeamIds");
+  const teamIds = Array.isArray(trackedTeamIds) ? trackedTeamIds : [];
+  if (teamIds.length === 0) return;
+
+  const teams = await loadTeams(teamIds);
+  if (!teams) return; // nothing cached yet — the next add/refresh will populate it
+
+  saveTeams(await refreshTeamCompetitions(teams));
+}
+
 // Refresh data, then update the badge/tooltip and fire any due notifications.
 async function refreshAndUpdate() {
   let wrote = false;
@@ -215,6 +232,12 @@ function ensureAlarms() {
   chrome.alarms.clear("checkNotifications", () => {
     chrome.alarms.create("checkNotifications", { periodInMinutes: 1 });
   });
+  // Re-resolve tracked teams' competitions weekly. A team's portfolio settles
+  // in once a season (e.g. a continental competition's draw), not
+  // continuously, so this is plenty — see refreshCompetitions.
+  chrome.alarms.clear("refreshCompetitions", () => {
+    chrome.alarms.create("refreshCompetitions", { periodInMinutes: 7 * 24 * 60 });
+  });
 }
 
 // Update badge when the browser starts
@@ -244,6 +267,10 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   // Every minute: fire due notifications and keep the badge current across
   // midnight. No fetch here — that would blow the API rate limit.
   if (alarm.name === "checkNotifications") { checkNotifications(); updateBadge(); }
+  // Weekly: re-resolve tracked teams' competitions from roster membership.
+  if (alarm.name === "refreshCompetitions") {
+    refreshCompetitions().catch((err) => console.error("refreshCompetitions failed:", err));
+  }
 });
 
 // Update badge immediately whenever the popup writes new match or team data.

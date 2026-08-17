@@ -203,7 +203,35 @@ async function resolveTeamCompetitions(id) {
   return matchingCompetitions(id, rostersByCode);
 }
 
+// Merge a freshly resolved competitions list into an already-tracked team's
+// record. Unions rather than replaces — a competition already recorded is
+// never dropped just because one roster fetch missed it (a transient failure,
+// or a competition this sweep didn't reach yet). National is recomputed the
+// same sticky way as teamsFromMatches. Pure — exported for testing.
+function applyResolvedCompetitions(team, resolved) {
+  const competitions = [...new Set([...(team.competitions || []), ...resolved])];
+  return {
+    ...team,
+    competitions,
+    national: team.national || competitions.some((c) => NATIONAL_COMP_CODES.has(c)),
+  };
+}
+
+// Re-resolve every already-tracked team's competitions from roster
+// membership. Run periodically (see background.js) so a competition
+// confirmed after a team was added — e.g. a club's Champions League slot
+// settling in once fd.org publishes the league-phase draw — gets picked up
+// automatically, without the user needing to remove and re-add the team.
+async function refreshTeamCompetitions(teams) {
+  const updated = [];
+  for (const team of teams) {
+    const resolved = await resolveTeamCompetitions(team.id);
+    updated.push(applyResolvedCompetitions(team, resolved));
+  }
+  return updated;
+}
+
 // Pure helpers exported for testing.
 if (typeof module !== "undefined") {
-  module.exports = { teamsFromMatches, matchingCompetitions };
+  module.exports = { teamsFromMatches, matchingCompetitions, applyResolvedCompetitions };
 }

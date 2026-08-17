@@ -1,4 +1,4 @@
-const { teamsFromMatches, matchingCompetitions } = require("../api");
+const { teamsFromMatches, matchingCompetitions, applyResolvedCompetitions } = require("../api");
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -108,5 +108,56 @@ describe("matchingCompetitions", () => {
     // rather than including an empty/wrong Set.
     const rostersByCode = { PD: new Set([81]) };
     expect(matchingCompetitions(81, rostersByCode)).toEqual(["PD"]);
+  });
+});
+
+// ── applyResolvedCompetitions ─────────────────────────────────────────────────
+// Used by the periodic competition-refresh sweep (background.js), which
+// re-runs resolveTeamCompetitions for every already-tracked team so a
+// competition confirmed after the team was added (e.g. a club's Champions
+// League slot settling in once fd.org publishes the league-phase draw) is
+// picked up automatically, without the user needing to remove and re-add the
+// team. Unions rather than replaces — a competition a team already has
+// recorded is never dropped just because one roster fetch missed it.
+
+describe("applyResolvedCompetitions", () => {
+  test("unions newly resolved competitions with the team's existing ones", () => {
+    const team = { id: 108, name: "Inter", competitions: ["SA"] };
+    const updated = applyResolvedCompetitions(team, ["SA", "CL"]);
+    expect(updated.competitions.sort()).toEqual(["CL", "SA"]);
+  });
+
+  test("dedupes when the resolved list overlaps entirely", () => {
+    const team = { id: 57, name: "Arsenal", competitions: ["PL"] };
+    const updated = applyResolvedCompetitions(team, ["PL"]);
+    expect(updated.competitions).toEqual(["PL"]);
+  });
+
+  test("never drops an existing competition, even if the resolved list omits it", () => {
+    // A transient roster-fetch failure for one competition shouldn't erase a
+    // previously confirmed one.
+    const team = { id: 81, name: "Barcelona", competitions: ["PD", "CL"] };
+    const updated = applyResolvedCompetitions(team, ["PD"]);
+    expect(updated.competitions.sort()).toEqual(["CL", "PD"]);
+  });
+
+  test("flips national to true when a resolved competition is WC/EC", () => {
+    const team = { id: 762, name: "Argentina", national: false, competitions: [] };
+    const updated = applyResolvedCompetitions(team, ["WC"]);
+    expect(updated.national).toBe(true);
+  });
+
+  test("keeps an existing national flag even when the resolved list has no WC/EC", () => {
+    const team = { id: 762, name: "Argentina", national: true, competitions: ["WC"] };
+    const updated = applyResolvedCompetitions(team, []);
+    expect(updated.national).toBe(true);
+  });
+
+  test("preserves other fields (name, shortName, crest) unchanged", () => {
+    const team = { id: 81, name: "FC Barcelona", shortName: "Barça", crest: "barca.png", competitions: ["PD"] };
+    const updated = applyResolvedCompetitions(team, ["CL"]);
+    expect(updated.name).toBe("FC Barcelona");
+    expect(updated.shortName).toBe("Barça");
+    expect(updated.crest).toBe("barca.png");
   });
 });
