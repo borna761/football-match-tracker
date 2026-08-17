@@ -231,7 +231,7 @@ function buildAddSection() {
     let teams = await loadCompCache(code);
     if (!teams) {
       try {
-        teams = await fetchCompTeams(code);
+        ({ teams } = await fetchCompTeams(code));
         saveCompCache(code, teams);
       } catch (err) {
         teamsList.innerHTML = `<div class="settings-status">Failed to load: ${err.message}</div>`;

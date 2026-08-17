@@ -142,64 +142,114 @@ function teamsFromMatches(teams, matches) {
   });
 }
 
-async function fetchTeamInfo(id) {
-  const res = await fetch(`https://api.football-data.org/v4/teams/${id}`, {
-    headers: { "X-Auth-Token": API_KEY },
-  });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  const json = await res.json();
-  const remaining = parseInt(res.headers.get("X-Requests-Available-Minute") ?? "10", 10);
-  const resetSecs = parseInt(res.headers.get("X-RequestCounter-Reset") ?? "0", 10);
-  if (remaining <= 1 && resetSecs > 0) {
-    await new Promise((r) => setTimeout(r, resetSecs * 1000 + 200));
-  }
-  const running = json.runningCompetitions || [];
-  const competitions = running.map((c) => c.code).filter(Boolean);
-  const national = running.some((c) => NATIONAL_COMP_CODES.has(c.code));
-  return { id, name: json.name, shortName: json.shortName, crest: json.crest, national, competitions };
-}
-
+// Fetches a competition's roster once; both the Settings browse UI (needs
+// display fields) and the competition-resolution sweep (needs just
+// membership + rate-limit headers to throttle) derive what they need from
+// the same response rather than issuing the same request twice.
 async function fetchCompTeams(code) {
   const res = await fetch(`https://api.football-data.org/v4/competitions/${code}/teams`, {
     headers: { "X-Auth-Token": API_KEY },
   });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const json = await res.json();
-  // Derive national status from the competition code rather than t.type,
-  // because the API does not reliably set a top-level type field on team objects.
-  const isNational = NATIONAL_COMP_CODES.has(code);
-  return (json.teams || []).map((t) => ({
+  const remaining = parseInt(res.headers.get("X-Requests-Available-Minute") ?? "10", 10);
+  const resetSecs = parseInt(res.headers.get("X-RequestCounter-Reset") ?? "0", 10);
+  const teams = (json.teams || []).map((t) => ({
     id:        t.id,
     name:      t.name,
     shortName: t.shortName,
     crest:     t.crest,
-    national:  isNational,
-    // Record the competition the team was browsed from so its matches can be
-    // fetched without ever hitting the (often 403'd) /v4/teams/{id} endpoint.
-    competitions: [code],
   }));
+  return { teams, remaining, resetSecs };
 }
 
-// Merge the browser-sourced team record (knownInfo, if any — records only the
-// single competition it was browsed from, see fetchCompTeams) with a full
-// team-info fetch. Neither source alone is reliable: knownInfo only has one
-// competition, and team-info's runningCompetitions only reflects competitions
-// with fixtures fd.org has already scheduled — a team confirmed in e.g. next
-// season's Champions League bracket without published fixtures yet won't show
-// CL there. Union both so a confirmed competition is never lost. Pure —
-// exported for testing.
-function mergeTeamInfo(knownInfo, full) {
-  const competitions = [...new Set([...(knownInfo?.competitions || []), ...full.competitions])];
+// Given a target team id and a map of {competitionCode: Set<teamId>} rosters,
+// return every code whose roster includes that team. Pure — exported for
+// testing.
+function matchingCompetitions(id, rostersByCode) {
+  return Object.entries(rostersByCode)
+    .filter(([, ids]) => ids.has(id))
+    .map(([code]) => code);
+}
+
+// Query every free-tier competition's roster and return the codes where this
+// team actually appears. This is the only authoritative source: unlike a
+// team's runningCompetitions, a roster reflects real enrollment even before
+// fixtures are scheduled (e.g. a team confirmed in this season's Champions
+// League bracket, with no CL matches published yet); and unlike the single
+// competition a team was browsed from in Settings, it doesn't depend on which
+// list the user happened to click "Add" from. Resilient per-competition: a
+// failed roster fetch is skipped (warn, not thrown) rather than losing every
+// other competition's result.
+async function resolveTeamCompetitions(id) {
+  const rostersByCode = {};
+  for (const code of FREE_COMP_CODES) {
+    try {
+      const { teams, remaining, resetSecs } = await fetchCompTeams(code);
+      rostersByCode[code] = new Set(teams.map((t) => t.id));
+      if (remaining <= 1 && resetSecs > 0) {
+        await new Promise((r) => setTimeout(r, resetSecs * 1000 + 200));
+      }
+    } catch (err) {
+      console.warn(`Skipping roster ${code}:`, err.message);
+    }
+  }
+  return matchingCompetitions(id, rostersByCode);
+}
+
+// Merge a freshly resolved competitions list into an already-tracked team's
+// record. Unions rather than replaces — a competition already recorded is
+// never dropped just because one roster fetch missed it (a transient failure,
+// or a competition this sweep didn't reach yet). National is recomputed the
+// same sticky way as teamsFromMatches. Pure — exported for testing.
+function applyResolvedCompetitions(team, resolved) {
+  const competitions = [...new Set([...(team.competitions || []), ...resolved])];
   return {
-    ...full,
+    ...team,
     competitions,
-    // Recompute from the merged list rather than trusting full.national alone,
-    // for the same reason as above.
-    national: full.national || competitions.some((c) => NATIONAL_COMP_CODES.has(c)),
+    national: team.national || competitions.some((c) => NATIONAL_COMP_CODES.has(c)),
   };
+}
+
+// Build a flat queue of every (team, competition) roster check the background
+// sweep needs to make. Ordered team-by-team so one team's full result is
+// available as soon as its block of checks finishes, rather than only once
+// the entire queue (all teams) drains. Pure — exported for testing.
+function buildSweepQueue(teamIds) {
+  return teamIds.flatMap((teamId) => FREE_COMP_CODES.map((code) => ({ teamId, code })));
+}
+
+// Record the outcome of one queue item's roster check into the results
+// accumulator. Immutable (returns a new object) and idempotent (checking the
+// same team/code twice doesn't duplicate an entry) so it's safe to call from
+// a resumed sweep that might re-check an item whose prior result wasn't
+// persisted yet. Pure — exported for testing.
+function recordSweepResult(results, teamId, code, matched) {
+  if (!matched) return results;
+  const existing = results[teamId] || [];
+  if (existing.includes(code)) return results;
+  return { ...results, [teamId]: [...existing, code] };
+}
+
+// Whether any team in a before/after pair grew its competitions list.
+// applyResolvedCompetitions only ever unions (never removes), so a length
+// change is sufficient evidence of a real change — no need to diff contents.
+// Used to decide whether matchesCache (a separate cache with its own TTL)
+// needs to be invalidated after a competition sweep, so newly-discovered
+// competitions' matches actually get fetched instead of the completed sweep
+// having no visible effect. Pure — exported for testing.
+function anyCompetitionsChanged(before, after) {
+  return before.some((team, i) => after[i].competitions.length !== team.competitions.length);
 }
 
 // Pure helpers exported for testing.
 if (typeof module !== "undefined") {
-  module.exports = { teamsFromMatches, mergeTeamInfo };
+  module.exports = {
+    teamsFromMatches,
+    matchingCompetitions,
+    applyResolvedCompetitions,
+    buildSweepQueue,
+    recordSweepResult,
+    anyCompetitionsChanged,
+  };
 }
