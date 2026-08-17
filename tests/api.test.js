@@ -1,4 +1,4 @@
-const { teamsFromMatches, matchingCompetitions, applyResolvedCompetitions, buildSweepQueue, recordSweepResult } = require("../api");
+const { teamsFromMatches, matchingCompetitions, applyResolvedCompetitions, buildSweepQueue, recordSweepResult, anyCompetitionsChanged } = require("../api");
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -217,5 +217,36 @@ describe("recordSweepResult", () => {
   test("does not duplicate a competition already recorded for that team", () => {
     const results = recordSweepResult({ 81: ["PD"] }, 81, "PD", true);
     expect(results[81]).toEqual(["PD"]);
+  });
+});
+
+// ── anyCompetitionsChanged ─────────────────────────────────────────────────────
+// Regression coverage for a real bug: the competition sweep correctly updated
+// Barcelona's stored teamsCache to ["CL", "PD"], but the popup still showed no
+// Barcelona matches — matchesCache is a separate cache with its own TTL, and
+// nothing told it to refetch using the newly-completed competitions list.
+// This decides whether the sweep needs to trigger that refetch.
+
+describe("anyCompetitionsChanged", () => {
+  test("true when a team's competitions grew", () => {
+    const before = [{ id: 81, competitions: ["CL"] }];
+    const after = [{ id: 81, competitions: ["CL", "PD"] }];
+    expect(anyCompetitionsChanged(before, after)).toBe(true);
+  });
+
+  test("false when nothing changed", () => {
+    const before = [{ id: 81, competitions: ["CL", "PD"] }];
+    const after = [{ id: 81, competitions: ["CL", "PD"] }];
+    expect(anyCompetitionsChanged(before, after)).toBe(false);
+  });
+
+  test("true when any one team in a list changed, not just the first", () => {
+    const before = [{ id: 57, competitions: ["PL"] }, { id: 108, competitions: ["SA"] }];
+    const after = [{ id: 57, competitions: ["PL"] }, { id: 108, competitions: ["SA", "CL"] }];
+    expect(anyCompetitionsChanged(before, after)).toBe(true);
+  });
+
+  test("false for an empty list", () => {
+    expect(anyCompetitionsChanged([], [])).toBe(false);
   });
 });

@@ -237,6 +237,17 @@ function recordSweepResult(results, teamId, code, matched) {
   return { ...results, [teamId]: [...existing, code] };
 }
 
+// Whether any team in a before/after pair grew its competitions list.
+// applyResolvedCompetitions only ever unions (never removes), so a length
+// change is sufficient evidence of a real change — no need to diff contents.
+// Used to decide whether matchesCache (a separate cache with its own TTL)
+// needs to be invalidated after a competition sweep, so newly-discovered
+// competitions' matches actually get fetched instead of the completed sweep
+// having no visible effect. Pure — exported for testing.
+function anyCompetitionsChanged(before, after) {
+  return before.some((team, i) => after[i].competitions.length !== team.competitions.length);
+}
+
 // Pure helpers exported for testing.
 if (typeof module !== "undefined") {
   module.exports = {
@@ -245,5 +256,6 @@ if (typeof module !== "undefined") {
     applyResolvedCompetitions,
     buildSweepQueue,
     recordSweepResult,
+    anyCompetitionsChanged,
   };
 }

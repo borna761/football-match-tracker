@@ -246,8 +246,19 @@ async function continueCompetitionSweep() {
 
   // Queue fully drained — merge results into the durable team records.
   const teams = await loadTeams(teamIds);
-  saveTeams(teams.map((t) => applyResolvedCompetitions(t, results[t.id] || [])));
+  const updated = teams.map((t) => applyResolvedCompetitions(t, results[t.id] || []));
+  saveTeams(updated);
   await chrome.storage.local.remove("compSweepState");
+
+  // matchesCache is a separate cache with its own TTL — updating teamsCache
+  // alone has no visible effect until something tells the match list to
+  // refetch using the newly-discovered competitions. Only do this if a
+  // competition was actually added; an unchanged sweep shouldn't force a
+  // refetch that would otherwise wait for the normal 6-hour cycle.
+  if (anyCompetitionsChanged(teams, updated)) {
+    await chrome.storage.local.remove("matchesCache");
+    refreshAndUpdate();
+  }
 }
 
 // Start a sweep if one isn't already running, then make progress on it right
