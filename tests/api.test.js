@@ -1,4 +1,4 @@
-const { teamsFromMatches, mergeTeamInfo } = require("../api");
+const { teamsFromMatches, matchingCompetitions } = require("../api");
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -77,49 +77,36 @@ describe("teamsFromMatches", () => {
   });
 });
 
-// ── mergeTeamInfo ────────────────────────────────────────────────────────────
-// Regression coverage for a real bug: Barcelona was added via the Champions
-// League competition browser (knownInfo.competitions = ["CL"]), and the full
-// team-info fetch's runningCompetitions came back ["PD"] only (La Liga) — CL
-// wasn't in it because fd.org hadn't scheduled group-stage fixtures yet. Either
-// source alone drops a real, confirmed competition; addTeam must union both.
+// ── matchingCompetitions ──────────────────────────────────────────────────────
+// Regression coverage for a real bug: neither the single competition a team
+// was browsed from, nor team-info's runningCompetitions (which only reflects
+// competitions with fixtures fd.org has already scheduled), reliably has a
+// team's complete competition list. Confirmed live: Barcelona and Inter are
+// both on the Champions League roster this season, but CL had zero scheduled
+// fixtures at the time, so runningCompetitions omitted it for both. Querying
+// every free-tier competition's roster directly and checking membership is
+// the only authoritative source — independent of fixture scheduling and of
+// which browser list the team happened to be added from.
 
-describe("mergeTeamInfo", () => {
-  test("unions knownInfo's browsed-from competition with team-info's list", () => {
-    const knownInfo = { id: 81, competitions: ["CL"] };
-    const full = { id: 81, name: "FC Barcelona", national: false, competitions: ["PD"] };
-    const merged = mergeTeamInfo(knownInfo, full);
-    expect(merged.competitions.sort()).toEqual(["CL", "PD"]);
+describe("matchingCompetitions", () => {
+  test("returns every competition whose roster includes the team", () => {
+    const rostersByCode = {
+      PD: new Set([81, 90]),
+      CL: new Set([81, 108]),
+      SA: new Set([108]),
+    };
+    expect(matchingCompetitions(81, rostersByCode).sort()).toEqual(["CL", "PD"]);
   });
 
-  test("dedupes when both sources report the same competition", () => {
-    const knownInfo = { competitions: ["PL"] };
-    const full = { competitions: ["PL"] };
-    const merged = mergeTeamInfo(knownInfo, full);
-    expect(merged.competitions).toEqual(["PL"]);
+  test("returns an empty array when the team is in no tracked roster", () => {
+    const rostersByCode = { PD: new Set([90]), SA: new Set([108]) };
+    expect(matchingCompetitions(81, rostersByCode)).toEqual([]);
   });
 
-  test("uses team-info's list alone when knownInfo is null (manual ID entry)", () => {
-    const full = { competitions: ["SA"] };
-    const merged = mergeTeamInfo(null, full);
-    expect(merged.competitions).toEqual(["SA"]);
-  });
-
-  test("recomputes national from the merged list, not just team-info's flag", () => {
-    // A national team whose WC fixtures aren't published yet would report
-    // national: false from team-info alone if trusted in isolation.
-    const knownInfo = { competitions: ["WC"] };
-    const full = { national: false, competitions: [] };
-    const merged = mergeTeamInfo(knownInfo, full);
-    expect(merged.national).toBe(true);
-  });
-
-  test("keeps team-info's other fields (name, shortName, crest)", () => {
-    const knownInfo = { competitions: ["CL"] };
-    const full = { name: "FC Barcelona", shortName: "Barça", crest: "barca.png", national: false, competitions: ["PD"] };
-    const merged = mergeTeamInfo(knownInfo, full);
-    expect(merged.name).toBe("FC Barcelona");
-    expect(merged.shortName).toBe("Barça");
-    expect(merged.crest).toBe("barca.png");
+  test("skips a roster that failed to fetch (absent from the map)", () => {
+    // resolveTeamCompetitions omits a code entirely if its request failed,
+    // rather than including an empty/wrong Set.
+    const rostersByCode = { PD: new Set([81]) };
+    expect(matchingCompetitions(81, rostersByCode)).toEqual(["PD"]);
   });
 });

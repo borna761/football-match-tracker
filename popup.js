@@ -16,20 +16,23 @@ async function readRawMatchCache() {
 }
 
 // ── Team management ───────────────────────────────────────────────────────────
-async function addTeam(id, knownInfo = null) {
+async function addTeam(id, knownInfo) {
   if (TEAM_IDS.includes(id)) return;
 
-  // We need the team's full competition list to fetch its matches. See
-  // mergeTeamInfo (api.js) for why both knownInfo and the team-info fetch are
-  // needed — neither alone reliably has the complete competition list. Fall
-  // back to knownInfo (or a bare placeholder) if team-info 403s, which it
-  // does for some clubs.
-  let info;
-  try {
-    info = mergeTeamInfo(knownInfo, await fetchTeamInfo(id));
-  } catch {
-    info = knownInfo || { id, name: String(id), shortName: String(id), crest: null, national: false, competitions: [] };
-  }
+  // See resolveTeamCompetitions (api.js) for why this — rather than the
+  // single competition knownInfo was browsed from, or a team-info fetch — is
+  // the only reliable source for a team's full competition list. A team that
+  // resolves to zero competitions (e.g. total network failure) falls back to
+  // the existing "unresolved team" sweep on the next refresh.
+  const competitions = await resolveTeamCompetitions(id);
+  const info = {
+    id,
+    name:      knownInfo.name,
+    shortName: knownInfo.shortName,
+    crest:     knownInfo.crest,
+    competitions,
+    national:  competitions.some((c) => NATIONAL_COMP_CODES.has(c)),
+  };
 
   TEAM_IDS.push(id);
   TRACKED_IDS.add(id);
@@ -42,9 +45,9 @@ async function addTeam(id, knownInfo = null) {
 
   // Fetch only this team's matches and merge into the existing cache so we
   // don't need to re-fetch every other team again. Skip when the team's
-  // competition is unknown (fetchTeamInfo failed) — fetchAllMatches would then
-  // sweep all 11 competitions just for this one add; let the next full refresh
-  // pick it up instead.
+  // competitions are unknown (resolveTeamCompetitions found none) —
+  // fetchAllMatches would then sweep all 11 competitions just for this one
+  // add; let the next full refresh pick it up instead.
   const existing = await readRawMatchCache();
   if (existing && info.competitions && info.competitions.length) {
     try {
