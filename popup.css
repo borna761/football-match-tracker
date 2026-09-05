@@ -182,7 +182,7 @@ body {
 /* ── Match row ── */
 .match-row {
   display: grid;
-  grid-template-columns: 1fr 150px 1fr;
+  grid-template-columns: 1fr 118px 1fr;
   align-items: center;
   gap: 8px;
   padding: 10px 16px;
