@@ -72,7 +72,54 @@ function groupTeams(teams) {
   };
 }
 
+// ── Badge ─────────────────────────────────────────────────────────────────────
+// Shared by the popup and the background worker so both compute the same
+// badge text/color from the same match list — one game(s)-today count in
+// orange, or the number of days until the next tracked match (in brackets)
+// in blue when nothing's on today.
+
+const BADGE_COLOR_TODAY = "#f97316";
+const BADGE_COLOR_UPCOMING = "#3b82f6";
+
+// Whole-day difference between two YYYY-MM-DD strings. Parsing both at local
+// midnight (rather than diffing raw timestamps) keeps this safe from DST.
+function daysBetween(fromDateStr, toDateStr) {
+  const from = new Date(`${fromDateStr}T00:00:00`);
+  const to = new Date(`${toDateStr}T00:00:00`);
+  return Math.round((to - from) / 86400000);
+}
+
+function getBadgeInfo(matches, trackedIds, enabledIds, now = new Date()) {
+  const todayStr = localIsoDate(now);
+
+  const todayCount = matches.filter((m) => {
+    if (!isVisible(m, trackedIds, enabledIds)) return false;
+    if (localIsoDate(new Date(m.utcDate)) !== todayStr) return false;
+    if (m.status === "FINISHED") return false;
+    if (isKickoffExpired(m.utcDate)) return false;
+    return true;
+  }).length;
+
+  if (todayCount > 0) {
+    return { text: String(todayCount), color: BADGE_COLOR_TODAY };
+  }
+
+  // Assumes matches is sorted chronologically (guaranteed by api.js) so the
+  // first match strictly after today is the next one.
+  const nextMatch = matches.find((m) => {
+    if (!isVisible(m, trackedIds, enabledIds)) return false;
+    return localIsoDate(new Date(m.utcDate)) > todayStr;
+  });
+
+  if (nextMatch) {
+    const days = daysBetween(todayStr, localIsoDate(new Date(nextMatch.utcDate)));
+    return { text: `(${days})`, color: BADGE_COLOR_UPCOMING };
+  }
+
+  return { text: "", color: BADGE_COLOR_TODAY };
+}
+
 // CommonJS export for Jest — not executed in the browser extension context
 if (typeof module !== "undefined") {
-  module.exports = { isoDate, localIsoDate, formatTime, formatDateLabel, dateKey, EXCLUDED_STATUSES, isVisible, isKickoffExpired, byDisplayName, groupTeams };
+  module.exports = { isoDate, localIsoDate, formatTime, formatDateLabel, dateKey, EXCLUDED_STATUSES, isVisible, isKickoffExpired, byDisplayName, groupTeams, getBadgeInfo };
 }
