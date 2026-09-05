@@ -46,8 +46,9 @@ async function updateBadge() {
   });
 
   // Badge
-  chrome.action.setBadgeText({ text: todayMatches.length > 0 ? String(todayMatches.length) : "" });
-  chrome.action.setBadgeBackgroundColor({ color: "#f97316" });
+  const badge = getBadgeInfo(matches, trackedIds, enabledIds);
+  chrome.action.setBadgeText({ text: badge.text });
+  chrome.action.setBadgeBackgroundColor({ color: badge.color });
 
   // Tooltip
   const label = (m) => {

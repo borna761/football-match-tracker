@@ -1,4 +1,4 @@
-const { isoDate, localIsoDate, formatTime, formatDateLabel, dateKey, isKickoffExpired } = require("../utils");
+const { isoDate, localIsoDate, formatTime, formatDateLabel, dateKey, isKickoffExpired, getBadgeInfo } = require("../utils");
 
 // All tests run with TZ=UTC (set via npm test script)
 
@@ -126,6 +126,89 @@ describe("isKickoffExpired", () => {
 
   test("returns false for a future kickoff", () => {
     expect(isKickoffExpired("2026-05-18T21:00:00Z")).toBe(false);
+  });
+});
+
+describe("getBadgeInfo", () => {
+  const NOW = new Date("2026-05-18T12:00:00Z");
+  const trackedIds = new Set([1, 2]);
+  const enabledIds = new Set([1, 2]);
+
+  function match({ id, utcDate, status = "SCHEDULED", homeId = 1, awayId = 99 }) {
+    return {
+      id,
+      utcDate,
+      status,
+      homeTeam: { id: homeId, name: "Home" },
+      awayTeam: { id: awayId, name: "Away" },
+    };
+  }
+
+  // isKickoffExpired reads the real clock, so it needs to be faked too —
+  // passing `now` only affects what getBadgeInfo treats as "today".
+  beforeEach(() => {
+    jest.useFakeTimers();
+    jest.setSystemTime(NOW);
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  test("shows today's match count in the today color", () => {
+    const matches = [
+      match({ id: 1, utcDate: "2026-05-18T15:00:00Z" }),
+      match({ id: 2, utcDate: "2026-05-18T18:00:00Z" }),
+    ];
+    expect(getBadgeInfo(matches, trackedIds, enabledIds, NOW)).toEqual({
+      text: "2",
+      color: "#f97316",
+    });
+  });
+
+  test("shows days until the next match, in brackets, in the upcoming color", () => {
+    const matches = [match({ id: 1, utcDate: "2026-05-21T15:00:00Z" })];
+    expect(getBadgeInfo(matches, trackedIds, enabledIds, NOW)).toEqual({
+      text: "(3)",
+      color: "#3b82f6",
+    });
+  });
+
+  test("prefers today's matches over a later upcoming match", () => {
+    const matches = [
+      match({ id: 1, utcDate: "2026-05-18T15:00:00Z" }),
+      match({ id: 2, utcDate: "2026-05-21T15:00:00Z" }),
+    ];
+    expect(getBadgeInfo(matches, trackedIds, enabledIds, NOW)).toEqual({
+      text: "1",
+      color: "#f97316",
+    });
+  });
+
+  test("ignores a finished or kickoff-expired match today when picking the next match", () => {
+    const matches = [
+      match({ id: 1, utcDate: "2026-05-18T08:00:00Z", status: "FINISHED" }),
+      match({ id: 2, utcDate: "2026-05-20T15:00:00Z" }),
+    ];
+    expect(getBadgeInfo(matches, trackedIds, enabledIds, NOW)).toEqual({
+      text: "(2)",
+      color: "#3b82f6",
+    });
+  });
+
+  test("ignores matches for untracked or disabled teams", () => {
+    const matches = [match({ id: 1, utcDate: "2026-05-21T15:00:00Z", homeId: 42, awayId: 43 })];
+    expect(getBadgeInfo(matches, trackedIds, enabledIds, NOW)).toEqual({
+      text: "",
+      color: "#f97316",
+    });
+  });
+
+  test("shows nothing when there are no tracked matches at all", () => {
+    expect(getBadgeInfo([], trackedIds, enabledIds, NOW)).toEqual({
+      text: "",
+      color: "#f97316",
+    });
   });
 });
 

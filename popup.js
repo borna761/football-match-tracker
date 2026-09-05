@@ -236,14 +236,9 @@ async function renderMatches(matches) {
   const todayStr = localIsoDate(new Date());
   const visible  = filterMatches(matches, todayStr, TRACKED_IDS, enabledTeamIds);
 
-  const todayCount = visible.filter((m) => {
-    if (localIsoDate(new Date(m.utcDate)) !== todayStr) return false;
-    if (m.status === "FINISHED") return false;
-    if (isKickoffExpired(m.utcDate)) return false;
-    return true;
-  }).length;
-  chrome.action.setBadgeText({ text: todayCount > 0 ? String(todayCount) : "" });
-  chrome.action.setBadgeBackgroundColor({ color: "#f97316" });
+  const badge = getBadgeInfo(matches, TRACKED_IDS, enabledTeamIds);
+  chrome.action.setBadgeText({ text: badge.text });
+  chrome.action.setBadgeBackgroundColor({ color: badge.color });
 
   const today    = visible.filter((m) => localIsoDate(new Date(m.utcDate)) === todayStr);
   const upcoming = visible.filter((m) => localIsoDate(new Date(m.utcDate)) >  todayStr);
