@@ -28,6 +28,8 @@ const {
   rateLimitRemainingMs,
   parseRetryAfterSecs,
   fetchWithTimeout,
+  fetchCompTeams,
+  recordRateLimit,
 } = require("../api");
 
 const TEAM = { id: 57, name: "Arsenal FC", competitions: ["PL", "CL", "PD"] };
@@ -152,5 +154,20 @@ describe("fetchWithTimeout", () => {
     jest.advanceTimersByTime(1001);
     await assertion;
     jest.useRealTimers();
+  });
+});
+
+describe("fetchCompTeams on HTTP 429", () => {
+  test("throws a rateLimited error carrying the wait", async () => {
+    global.fetch = jest.fn().mockResolvedValue(res(429, { headers: { "Retry-After": "45" } }));
+    await expect(fetchCompTeams("PL")).rejects.toMatchObject({ rateLimited: true, retryAfterSecs: 45 });
+  });
+});
+
+describe("recordRateLimit", () => {
+  test("stores the backoff and returns the seconds", async () => {
+    const secs = await recordRateLimit(60);
+    expect(secs).toBe(60);
+    expect(store.rateLimitedUntil).toBeGreaterThan(Date.now() + 59_000);
   });
 });

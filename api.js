@@ -36,6 +36,13 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = REQUEST_TIMEOUT_M
   }
 }
 
+function rateLimitError(res) {
+  const err = new Error("HTTP 429");
+  err.rateLimited = true;
+  err.retryAfterSecs = parseRetryAfterSecs(res.headers);
+  return err;
+}
+
 // Seconds to wait after a 429, from Retry-After or the API's reset counter.
 // Pure — exported for testing.
 function parseRetryAfterSecs(headers) {
@@ -91,10 +98,7 @@ async function fetchCompMatches(code) {
   const url = `https://api.football-data.org/v4/competitions/${code}/matches?dateFrom=${localIsoDate(from)}&dateTo=${isoDate(to)}`;
   const res = await fetchWithTimeout(url, { headers: { "X-Auth-Token": API_KEY } });
   if (res.status === 429) {
-    const err = new Error("HTTP 429");
-    err.rateLimited = true;
-    err.retryAfterSecs = parseRetryAfterSecs(res.headers);
-    throw err;
+    throw rateLimitError(res);
   }
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const json = await res.json();
@@ -227,6 +231,7 @@ async function fetchCompTeams(code) {
   const res = await fetchWithTimeout(`https://api.football-data.org/v4/competitions/${code}/teams`, {
     headers: { "X-Auth-Token": API_KEY },
   });
+  if (res.status === 429) throw rateLimitError(res);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const json = await res.json();
   const remaining = parseInt(res.headers.get("X-Requests-Available-Minute") ?? "10", 10);
@@ -260,6 +265,7 @@ function matchingCompetitions(id, rostersByCode) {
 // other competition's result.
 async function resolveTeamCompetitions(id) {
   const rostersByCode = {};
+  if (rateLimitRemainingMs(await getRateLimitedUntil()) > 0) return [];
   for (const code of FREE_COMP_CODES) {
     try {
       const { teams, remaining, resetSecs } = await fetchCompTeams(code);
@@ -268,6 +274,11 @@ async function resolveTeamCompetitions(id) {
         await new Promise((r) => setTimeout(r, resetSecs * 1000 + 200));
       }
     } catch (err) {
+      if (err.rateLimited) {
+        await recordRateLimit(err.retryAfterSecs);
+        console.warn(`Rate limited at roster ${code}; stopping`);
+        break;
+      }
       console.warn(`Skipping roster ${code}:`, err.message);
     }
   }
@@ -324,6 +335,8 @@ if (typeof module !== "undefined") {
   module.exports = {
     fetchAllMatches,
     fetchWithTimeout,
+    fetchCompTeams,
+    recordRateLimit,
     parseRetryAfterSecs,
     rateLimitRemainingMs,
     getRateLimitedUntil,
