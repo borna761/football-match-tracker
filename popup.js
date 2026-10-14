@@ -226,7 +226,7 @@ function filterMatches(matches, todayStr, trackedIds, enabledIds) {
 }
 
 if (typeof module !== "undefined") {
-  module.exports = { filterMatches };
+  module.exports = { filterMatches, rateLimitMessage };
 }
 
 async function renderMatches(matches) {
@@ -388,6 +388,25 @@ function healTeams(matches) {
   renderCrests();
 }
 
+function rateLimitMessage(remainingMs) {
+  return `Rate limited by football-data.org — retrying in ${Math.max(1, Math.ceil(remainingMs / 1000))}s…`;
+}
+
+// Keep the spinner up with a live countdown while football-data.org's rate
+// limit is active, then retry the load automatically.
+function showRateLimitCountdown(until) {
+  showLoading(rateLimitMessage(rateLimitRemainingMs(until)));
+  const tick = setInterval(() => {
+    const left = rateLimitRemainingMs(until);
+    if (left <= 0) {
+      clearInterval(tick);
+      load().catch(() => {});
+    } else {
+      setLoadingText(rateLimitMessage(left));
+    }
+  }, 1000);
+}
+
 function setLoadingText(msg) {
   const span = document.querySelector("#loading span");
   if (span) span.textContent = msg;
@@ -431,6 +450,11 @@ async function load(suppressError = false) {
     let cache = await loadCache(TEAM_IDS);
     if (!cache) {
       const matches = await fetchAllMatches(TEAMS);
+      const limitedUntil = await getRateLimitedUntil();
+      if (matches.length === 0 && TEAMS.length > 0 && rateLimitRemainingMs(limitedUntil) > 0) {
+        showRateLimitCountdown(limitedUntil);
+        return;
+      }
       if (matches.length === 0 && TEAMS.length > 0) {
         // No matches: either genuinely none in the window (off-season) or a
         // transient fetch failure. Show the normal "No upcoming matches" empty

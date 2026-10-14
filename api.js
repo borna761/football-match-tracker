@@ -16,6 +16,51 @@ const FREE_COMP_CODES = ["PL", "PD", "BL1", "SA", "FL1", "CL", "WC", "EC", "ELC"
 // Throttle the sweep to at most once per this interval.
 const SWEEP_THROTTLE_MS = 12 * 60 * 60 * 1000; // 12 hours
 
+// football-data.org's free tier allows ~10 requests/minute. After a 429 we stop
+// all fetching (popup and background worker share this) until the window passes.
+const REQUEST_TIMEOUT_MS = 10_000;
+const DEFAULT_RETRY_AFTER_SECS = 60;
+
+// fetch() with an abort timeout so a hung connection can't leave the popup on
+// its loading spinner forever.
+async function fetchWithTimeout(url, options = {}, timeoutMs = REQUEST_TIMEOUT_MS) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } catch (err) {
+    if (controller.signal.aborted) throw new Error(`Request timed out after ${timeoutMs / 1000}s`);
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// Seconds to wait after a 429, from Retry-After or the API's reset counter.
+// Pure — exported for testing.
+function parseRetryAfterSecs(headers) {
+  for (const name of ["Retry-After", "X-RequestCounter-Reset"]) {
+    const n = parseInt(headers.get(name), 10);
+    if (n > 0) return n;
+  }
+  return DEFAULT_RETRY_AFTER_SECS;
+}
+
+// Milliseconds left on a backoff (0 when none is active). Pure — exported for testing.
+function rateLimitRemainingMs(until, now = Date.now()) {
+  return until && until > now ? until - now : 0;
+}
+
+function getRateLimitedUntil() {
+  return new Promise((resolve) => {
+    chrome.storage.local.get("rateLimitedUntil", (data) => resolve(data.rateLimitedUntil ?? 0));
+  });
+}
+
+function setRateLimitedUntil(until) {
+  chrome.storage.local.set({ rateLimitedUntil: until });
+}
+
 // Fetch a single competition's matches in the lookahead window.
 // We fetch per competition rather than per team because the team-matches
 // endpoint returns 403 if a team has any fixture in a competition outside the
@@ -29,7 +74,13 @@ async function fetchCompMatches(code) {
   // Use local date for dateFrom so matches from today aren't missed when
   // the local clock is still on "today" but UTC has already rolled over.
   const url = `https://api.football-data.org/v4/competitions/${code}/matches?dateFrom=${localIsoDate(from)}&dateTo=${isoDate(to)}`;
-  const res = await fetch(url, { headers: { "X-Auth-Token": API_KEY } });
+  const res = await fetchWithTimeout(url, { headers: { "X-Auth-Token": API_KEY } });
+  if (res.status === 429) {
+    const err = new Error("HTTP 429");
+    err.rateLimited = true;
+    err.retryAfterSecs = parseRetryAfterSecs(res.headers);
+    throw err;
+  }
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const json = await res.json();
   if (json.errorCode) throw new Error(json.message);
@@ -58,6 +109,9 @@ function markSwept() {
 // the teams play in (one request each), then keeps only matches involving a
 // tracked team. Competitions the key can't access (free-tier 403) are skipped.
 async function fetchAllMatches(teams) {
+  // Still inside a 429 backoff: don't touch the API, or we keep the key throttled.
+  if (rateLimitRemainingMs(await getRateLimitedUntil()) > 0) return [];
+
   const trackedIds = new Set(teams.map((t) => t.id));
   const codes = new Set(teams.flatMap((t) => t.competitions || []));
   // If any team has no known competition (e.g. a club whose team-info endpoint
@@ -88,6 +142,13 @@ async function fetchAllMatches(teams) {
         await new Promise((r) => setTimeout(r, resetSecs * 1000 + 200));
       }
     } catch (err) {
+      if (err.rateLimited) {
+        // Throttled: every further request would 429 too. Stop, remember when
+        // to resume, and return whatever was already fetched.
+        setRateLimitedUntil(Date.now() + err.retryAfterSecs * 1000);
+        console.warn(`Rate limited at ${code}; pausing ${err.retryAfterSecs}s`);
+        break;
+      }
       // Skip competitions outside the key's plan (403) or that error; the rest
       // still load. warn, not error — this is expected and handled.
       console.warn(`Skipping competition ${code}:`, err.message);
@@ -147,7 +208,7 @@ function teamsFromMatches(teams, matches) {
 // membership + rate-limit headers to throttle) derive what they need from
 // the same response rather than issuing the same request twice.
 async function fetchCompTeams(code) {
-  const res = await fetch(`https://api.football-data.org/v4/competitions/${code}/teams`, {
+  const res = await fetchWithTimeout(`https://api.football-data.org/v4/competitions/${code}/teams`, {
     headers: { "X-Auth-Token": API_KEY },
   });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -245,6 +306,11 @@ function anyCompetitionsChanged(before, after) {
 // Pure helpers exported for testing.
 if (typeof module !== "undefined") {
   module.exports = {
+    fetchAllMatches,
+    fetchWithTimeout,
+    parseRetryAfterSecs,
+    rateLimitRemainingMs,
+    getRateLimitedUntil,
     teamsFromMatches,
     matchingCompetitions,
     applyResolvedCompetitions,
