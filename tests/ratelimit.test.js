@@ -112,6 +112,35 @@ describe("fetchAllMatches on HTTP 429", () => {
   });
 });
 
+describe("escalating backoff", () => {
+  const limited = () => res(429, { headers: { "Retry-After": "30" } });
+
+  async function lastBackoffSecs() {
+    const before = Date.now();
+    await fetchAllMatches([TEAM]);
+    return Math.round(((await getRateLimitedUntil()) - before) / 1000);
+  }
+
+  test("doubles the wait on consecutive 429s", async () => {
+    global.fetch = jest.fn().mockResolvedValue(limited());
+    expect(await lastBackoffSecs()).toBe(30);
+    store.rateLimitedUntil = 0; // backoff elapsed
+    expect(await lastBackoffSecs()).toBe(60);
+    store.rateLimitedUntil = 0;
+    expect(await lastBackoffSecs()).toBe(120);
+  });
+
+  test("resets after a successful request", async () => {
+    global.fetch = jest.fn().mockResolvedValue(limited());
+    await fetchAllMatches([TEAM]);
+    store.rateLimitedUntil = 0;
+    global.fetch = jest.fn().mockResolvedValue(res(200));
+    await fetchAllMatches([TEAM]);
+    global.fetch = jest.fn().mockResolvedValue(limited());
+    expect(await lastBackoffSecs()).toBe(30);
+  });
+});
+
 describe("fetchWithTimeout", () => {
   test("aborts a request that never responds", async () => {
     jest.useFakeTimers();

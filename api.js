@@ -57,8 +57,23 @@ function getRateLimitedUntil() {
   });
 }
 
-function setRateLimitedUntil(until) {
-  chrome.storage.local.set({ rateLimitedUntil: until });
+const MAX_BACKOFF_SECS = 15 * 60;
+
+// Record a 429. Waiting only the advertised time isn't enough — the API sends
+// no Retry-After and retrying right at the window edge tends to 429 again — so
+// the wait doubles on each consecutive 429 and resets after a success.
+// Returns the seconds to wait.
+function recordRateLimit(retryAfterSecs) {
+  return new Promise((resolve) => {
+    chrome.storage.local.get("rateLimitStrikes", (data) => {
+      const strikes = data.rateLimitStrikes ?? 0;
+      const secs = Math.min(retryAfterSecs * 2 ** strikes, MAX_BACKOFF_SECS);
+      chrome.storage.local.set({
+        rateLimitedUntil: Date.now() + secs * 1000,
+        rateLimitStrikes: strikes + 1,
+      }, () => resolve(secs));
+    });
+  });
 }
 
 // Fetch a single competition's matches in the lookahead window.
@@ -131,6 +146,7 @@ async function fetchAllMatches(teams) {
   for (const code of codes) {
     try {
       const { matches, remaining, resetSecs } = await fetchCompMatches(code);
+      if (!anyOk) chrome.storage.local.set({ rateLimitStrikes: 0 });
       anyOk = true;
       for (const match of matches) {
         if (!trackedIds.has(match.homeTeam.id) && !trackedIds.has(match.awayTeam.id)) continue;
@@ -145,8 +161,8 @@ async function fetchAllMatches(teams) {
       if (err.rateLimited) {
         // Throttled: every further request would 429 too. Stop, remember when
         // to resume, and return whatever was already fetched.
-        setRateLimitedUntil(Date.now() + err.retryAfterSecs * 1000);
-        console.warn(`Rate limited at ${code}; pausing ${err.retryAfterSecs}s`);
+        const secs = await recordRateLimit(err.retryAfterSecs);
+        console.warn(`Rate limited at ${code}; pausing ${secs}s`);
         break;
       }
       // Skip competitions outside the key's plan (403) or that error; the rest
