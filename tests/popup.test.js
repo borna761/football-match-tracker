@@ -118,3 +118,14 @@ describe("filterMatches — team toggle filtering", () => {
     expect(filterMatches(matches, TODAY, TRACKED, NONE_ON)).toHaveLength(0);
   });
 });
+
+// ── rateLimitMessage ─────────────────────────────────────────────────────────
+describe("rateLimitMessage", () => {
+  const { rateLimitMessage } = require("../popup");
+  test("rounds up to whole seconds", () => {
+    expect(rateLimitMessage(29_100)).toBe("Rate limited by football-data.org — retrying in 30s…");
+  });
+  test("never shows less than 1s", () => {
+    expect(rateLimitMessage(10)).toBe("Rate limited by football-data.org — retrying in 1s…");
+  });
+});

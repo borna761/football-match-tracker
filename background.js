@@ -226,6 +226,14 @@ async function continueCompetitionSweep() {
 
   let { teamIds, queue, results } = compSweepState;
 
+  // Share the popup's / refresh's rate-limit backoff: while it's active, don't
+  // touch the API — just come back when it ends.
+  const waitMs = rateLimitRemainingMs(await getRateLimitedUntil());
+  if (waitMs > 0) {
+    chrome.alarms.create("competitionSweepResume", { delayInMinutes: Math.max(1, Math.ceil(waitMs / 60000)) });
+    return;
+  }
+
   while (queue.length > 0) {
     const { teamId, code } = queue[0];
     try {
@@ -240,6 +248,12 @@ async function continueCompetitionSweep() {
         return;
       }
     } catch (err) {
+      if (err.rateLimited) {
+        // Keep this item queued (don't skip it) and resume after the backoff.
+        const secs = await recordRateLimit(err.retryAfterSecs);
+        chrome.alarms.create("competitionSweepResume", { delayInMinutes: Math.max(1, Math.ceil(secs / 60)) });
+        return;
+      }
       console.warn(`Skipping roster ${code} for team ${teamId}:`, err.message);
       queue = queue.slice(1);
       await chrome.storage.local.set({ compSweepState: { teamIds, queue, results } });

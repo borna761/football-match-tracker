@@ -16,6 +16,73 @@ const FREE_COMP_CODES = ["PL", "PD", "BL1", "SA", "FL1", "CL", "WC", "EC", "ELC"
 // Throttle the sweep to at most once per this interval.
 const SWEEP_THROTTLE_MS = 12 * 60 * 60 * 1000; // 12 hours
 
+// football-data.org's free tier allows ~10 requests/minute. After a 429 we stop
+// all fetching (popup and background worker share this) until the window passes.
+const REQUEST_TIMEOUT_MS = 10_000;
+const DEFAULT_RETRY_AFTER_SECS = 60;
+
+// fetch() with an abort timeout so a hung connection can't leave the popup on
+// its loading spinner forever.
+async function fetchWithTimeout(url, options = {}, timeoutMs = REQUEST_TIMEOUT_MS) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } catch (err) {
+    if (controller.signal.aborted) throw new Error(`Request timed out after ${timeoutMs / 1000}s`);
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function rateLimitError(res) {
+  const err = new Error("HTTP 429");
+  err.rateLimited = true;
+  err.retryAfterSecs = parseRetryAfterSecs(res.headers);
+  return err;
+}
+
+// Seconds to wait after a 429, from Retry-After or the API's reset counter.
+// Pure — exported for testing.
+function parseRetryAfterSecs(headers) {
+  for (const name of ["Retry-After", "X-RequestCounter-Reset"]) {
+    const n = parseInt(headers.get(name), 10);
+    if (n > 0) return n;
+  }
+  return DEFAULT_RETRY_AFTER_SECS;
+}
+
+// Milliseconds left on a backoff (0 when none is active). Pure — exported for testing.
+function rateLimitRemainingMs(until, now = Date.now()) {
+  return until && until > now ? until - now : 0;
+}
+
+function getRateLimitedUntil() {
+  return new Promise((resolve) => {
+    chrome.storage.local.get("rateLimitedUntil", (data) => resolve(data.rateLimitedUntil ?? 0));
+  });
+}
+
+const MAX_BACKOFF_SECS = 15 * 60;
+
+// Record a 429. Waiting only the advertised time isn't enough — the API sends
+// no Retry-After and retrying right at the window edge tends to 429 again — so
+// the wait doubles on each consecutive 429 and resets after a success.
+// Returns the seconds to wait.
+function recordRateLimit(retryAfterSecs) {
+  return new Promise((resolve) => {
+    chrome.storage.local.get("rateLimitStrikes", (data) => {
+      const strikes = data.rateLimitStrikes ?? 0;
+      const secs = Math.min(retryAfterSecs * 2 ** strikes, MAX_BACKOFF_SECS);
+      chrome.storage.local.set({
+        rateLimitedUntil: Date.now() + secs * 1000,
+        rateLimitStrikes: strikes + 1,
+      }, () => resolve(secs));
+    });
+  });
+}
+
 // Fetch a single competition's matches in the lookahead window.
 // We fetch per competition rather than per team because the team-matches
 // endpoint returns 403 if a team has any fixture in a competition outside the
@@ -29,7 +96,10 @@ async function fetchCompMatches(code) {
   // Use local date for dateFrom so matches from today aren't missed when
   // the local clock is still on "today" but UTC has already rolled over.
   const url = `https://api.football-data.org/v4/competitions/${code}/matches?dateFrom=${localIsoDate(from)}&dateTo=${isoDate(to)}`;
-  const res = await fetch(url, { headers: { "X-Auth-Token": API_KEY } });
+  const res = await fetchWithTimeout(url, { headers: { "X-Auth-Token": API_KEY } });
+  if (res.status === 429) {
+    throw rateLimitError(res);
+  }
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const json = await res.json();
   if (json.errorCode) throw new Error(json.message);
@@ -58,6 +128,9 @@ function markSwept() {
 // the teams play in (one request each), then keeps only matches involving a
 // tracked team. Competitions the key can't access (free-tier 403) are skipped.
 async function fetchAllMatches(teams) {
+  // Still inside a 429 backoff: don't touch the API, or we keep the key throttled.
+  if (rateLimitRemainingMs(await getRateLimitedUntil()) > 0) return [];
+
   const trackedIds = new Set(teams.map((t) => t.id));
   const codes = new Set(teams.flatMap((t) => t.competitions || []));
   // If any team has no known competition (e.g. a club whose team-info endpoint
@@ -77,6 +150,7 @@ async function fetchAllMatches(teams) {
   for (const code of codes) {
     try {
       const { matches, remaining, resetSecs } = await fetchCompMatches(code);
+      if (!anyOk) chrome.storage.local.set({ rateLimitStrikes: 0 });
       anyOk = true;
       for (const match of matches) {
         if (!trackedIds.has(match.homeTeam.id) && !trackedIds.has(match.awayTeam.id)) continue;
@@ -88,6 +162,13 @@ async function fetchAllMatches(teams) {
         await new Promise((r) => setTimeout(r, resetSecs * 1000 + 200));
       }
     } catch (err) {
+      if (err.rateLimited) {
+        // Throttled: every further request would 429 too. Stop, remember when
+        // to resume, and return whatever was already fetched.
+        const secs = await recordRateLimit(err.retryAfterSecs);
+        console.warn(`Rate limited at ${code}; pausing ${secs}s`);
+        break;
+      }
       // Skip competitions outside the key's plan (403) or that error; the rest
       // still load. warn, not error — this is expected and handled.
       console.warn(`Skipping competition ${code}:`, err.message);
@@ -147,9 +228,10 @@ function teamsFromMatches(teams, matches) {
 // membership + rate-limit headers to throttle) derive what they need from
 // the same response rather than issuing the same request twice.
 async function fetchCompTeams(code) {
-  const res = await fetch(`https://api.football-data.org/v4/competitions/${code}/teams`, {
+  const res = await fetchWithTimeout(`https://api.football-data.org/v4/competitions/${code}/teams`, {
     headers: { "X-Auth-Token": API_KEY },
   });
+  if (res.status === 429) throw rateLimitError(res);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const json = await res.json();
   const remaining = parseInt(res.headers.get("X-Requests-Available-Minute") ?? "10", 10);
@@ -183,6 +265,7 @@ function matchingCompetitions(id, rostersByCode) {
 // other competition's result.
 async function resolveTeamCompetitions(id) {
   const rostersByCode = {};
+  if (rateLimitRemainingMs(await getRateLimitedUntil()) > 0) return [];
   for (const code of FREE_COMP_CODES) {
     try {
       const { teams, remaining, resetSecs } = await fetchCompTeams(code);
@@ -191,6 +274,11 @@ async function resolveTeamCompetitions(id) {
         await new Promise((r) => setTimeout(r, resetSecs * 1000 + 200));
       }
     } catch (err) {
+      if (err.rateLimited) {
+        await recordRateLimit(err.retryAfterSecs);
+        console.warn(`Rate limited at roster ${code}; stopping`);
+        break;
+      }
       console.warn(`Skipping roster ${code}:`, err.message);
     }
   }
@@ -245,6 +333,13 @@ function anyCompetitionsChanged(before, after) {
 // Pure helpers exported for testing.
 if (typeof module !== "undefined") {
   module.exports = {
+    fetchAllMatches,
+    fetchWithTimeout,
+    fetchCompTeams,
+    recordRateLimit,
+    parseRetryAfterSecs,
+    rateLimitRemainingMs,
+    getRateLimitedUntil,
     teamsFromMatches,
     matchingCompetitions,
     applyResolvedCompetitions,
