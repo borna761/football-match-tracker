@@ -149,8 +149,9 @@ function renderMatch(match, fotmobData) {
   const fotmobUrl = fotmobData?.url ?? fotmobData;
   const { status, score } = match;
   const isFinished = status === "FINISHED";
-  const isHalfTime = status === "PAUSED";
-  const isLive     = !isHalfTime && isMatchInProgress(status, fotmobData);
+  const inProgress = isMatchInProgress(status, fotmobData, isKickoffExpired(match.utcDate));
+  const isHalfTime = status === "PAUSED" && inProgress;
+  const isLive     = !isHalfTime && inProgress;
 
   const row = document.createElement("div");
   row.className = "match-row";
@@ -290,7 +291,7 @@ async function renderMatches(matches) {
           }
         }
         const fData = getFotmobData(match, fotmobMap);
-        if (isMatchInProgress(match.status, fData)) anyLive = true;
+        if (isMatchInProgress(match.status, fData, isKickoffExpired(match.utcDate))) anyLive = true;
         fragment.appendChild(renderMatch(match, fData));
       }
       return anchor;

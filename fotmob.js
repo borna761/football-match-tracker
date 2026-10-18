@@ -198,8 +198,12 @@ function getFotmobData(match, fotmobMap) {
 // refresh. Includes PAUSED (half-time) because the score can change once the
 // second half kicks off. Callers that only want to show a live-score UI (not
 // schedule a refresh) should additionally exclude PAUSED.
-function isMatchInProgress(status, fotmobData) {
-  if (status === "IN_PLAY" || status === "PAUSED") return true;
+// `kickoffExpired` guards against a stale fd.org IN_PLAY/PAUSED status: once
+// kickoff is long past, only FotMob's live data can keep the match "live".
+function isMatchInProgress(status, fotmobData, kickoffExpired = false) {
+  if (status === "IN_PLAY" || status === "PAUSED") {
+    return !kickoffExpired || fotmobData?.live != null;
+  }
   if (status === "FINISHED") return false;
   return fotmobData?.live != null;
 }

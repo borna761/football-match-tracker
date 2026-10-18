@@ -202,4 +202,23 @@ describe("isMatchInProgress", () => {
   test("SCHEDULED without FotMob live data is not in progress", () => {
     expect(isMatchInProgress("SCHEDULED", noLive)).toBe(false);
   });
+
+  // The fd.org cache refreshes every 6 hours, so a long-finished match can
+  // still read IN_PLAY / PAUSED. Once kickoff has expired, only FotMob can
+  // vouch that it's still live.
+  test("stale IN_PLAY past kickoff expiry without FotMob live data is not in progress", () => {
+    expect(isMatchInProgress("IN_PLAY", noLive, true)).toBe(false);
+  });
+
+  test("stale PAUSED past kickoff expiry without FotMob live data is not in progress", () => {
+    expect(isMatchInProgress("PAUSED", noLive, true)).toBe(false);
+  });
+
+  test("IN_PLAY past kickoff expiry is still in progress when FotMob says it's live", () => {
+    expect(isMatchInProgress("IN_PLAY", withLive, true)).toBe(true);
+  });
+
+  test("IN_PLAY before kickoff expiry stays in progress without FotMob live data", () => {
+    expect(isMatchInProgress("IN_PLAY", noLive, false)).toBe(true);
+  });
 });
