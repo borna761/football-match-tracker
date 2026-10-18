@@ -92,6 +92,21 @@ function normalizeTeam(name) {
 const _fotmobCache = {};
 const FOTMOB_CACHE_TTL_MS = 5 * 60 * 1000;
 
+// Reduce a raw FotMob match to what the popup needs: link, live data while in
+// play, and the full-time score once it's over (cancelled matches don't count).
+function parseFotmobMatch(match) {
+  const st = match.status;
+  return {
+    url: `https://www.fotmob.com/match/${match.id}`,
+    live: st?.ongoing
+      ? { home: match.home?.score, away: match.away?.score, minute: st?.liveTime?.short ?? null }
+      : null,
+    finished: st?.finished && !st?.cancelled
+      ? { home: match.home?.score ?? null, away: match.away?.score ?? null }
+      : null,
+  };
+}
+
 // ── Fetch FotMob match URLs ───────────────────────────────────────────────────
 async function fetchFotmobUrls(dates) {
   const map = {};
@@ -126,13 +141,8 @@ async function fetchFotmobUrls(dates) {
         const hName = match.home?.name;
         const aName = match.away?.name;
         if (!hName || !aName || !match.id) continue;
-        const key = `${normalizeTeam(hName)}|${normalizeTeam(aName)}`;
-        dateMap[key] = {
-          url: `https://www.fotmob.com/match/${match.id}`,
-          live: match.status?.ongoing
-            ? { home: match.home?.score, away: match.away?.score, minute: match.status?.liveTime?.short ?? null }
-            : null,
-        };
+        const key = `${dateStr}|${normalizeTeam(hName)}|${normalizeTeam(aName)}`;
+        dateMap[key] = parseFotmobMatch(match);
       }
     }
     // Only cache future dates — today must stay fresh for live scores
@@ -168,22 +178,27 @@ function _teamVariants(team) {
   return variants;
 }
 
+// Entries are keyed `<YYYY-MM-DD>|<home>|<away>` (UTC date, matching the fetch)
+// so the same two teams meeting on different days never share an entry. A match
+// with no utcDate looks up un-prefixed `<home>|<away>` keys.
 // exported for testing
 function getFotmobData(match, fotmobMap) {
   const homeV = _teamVariants(match.homeTeam);
   const awayV = _teamVariants(match.awayTeam);
+  const prefix = match.utcDate ? `${isoDate(new Date(match.utcDate))}|` : "";
 
   // Direct lookup — try every name/shortName combination
   for (const hN of homeV) {
     for (const aN of awayV) {
-      const hit = fotmobMap[`${hN}|${aN}`];
+      const hit = fotmobMap[`${prefix}${hN}|${aN}`];
       if (hit) return hit;
     }
   }
 
-  // Fuzzy match — prefix / substring fallback
+  // Fuzzy match — prefix / substring fallback, within the same date
   for (const [key, entry] of Object.entries(fotmobMap)) {
-    const [fmH, fmA] = key.split("|");
+    if (!key.startsWith(prefix)) continue;
+    const [fmH, fmA] = key.slice(prefix.length).split("|");
     if (homeV.some(h => _namesMatch(h, fmH)) && awayV.some(a => _namesMatch(a, fmA))) {
       return entry;
     }
@@ -191,19 +206,42 @@ function getFotmobData(match, fotmobMap) {
 
   const home = match.homeTeam.shortName || match.homeTeam.name;
   const away = match.awayTeam.shortName || match.awayTeam.name;
-  return { url: `https://www.fotmob.com/search?q=${encodeURIComponent(`${home} ${away}`)}`, live: null };
+  return { url: `https://www.fotmob.com/search?q=${encodeURIComponent(`${home} ${away}`)}`, live: null, finished: null };
 }
 
-// Returns true when a match is in progress and warrants a 30-second live
-// refresh. Includes PAUSED (half-time) because the score can change once the
-// second half kicks off. Callers that only want to show a live-score UI (not
-// schedule a refresh) should additionally exclude PAUSED.
-function isMatchInProgress(status, fotmobData) {
-  if (status === "IN_PLAY" || status === "PAUSED") return true;
-  if (status === "FINISHED") return false;
-  return fotmobData?.live != null;
+// What the popup should show for a match. fd.org's cache refreshes every 6
+// hours, so its status can lag; FotMob (fetched fresh for today) overrides it:
+//   "finished"             — fd.org FINISHED, or FotMob says finished
+//   "finished-unconfirmed" — fd.org still says IN_PLAY/PAUSED long after kickoff
+//                            and FotMob can't vouch it's live; almost certainly over
+//   "halftime" / "live"    — in progress (PAUSED / everything else)
+//   "scheduled"            — not started
+// isKickoffExpired comes from utils.js.
+function matchPhase(match, fotmobData) {
+  const { status } = match;
+  if (status === "FINISHED" || fotmobData?.finished) return "finished";
+  const fotmobLive = fotmobData?.live != null;
+  if (status === "IN_PLAY" || status === "PAUSED") {
+    if (isKickoffExpired(match.utcDate) && !fotmobLive) return "finished-unconfirmed";
+    return status === "PAUSED" ? "halftime" : "live";
+  }
+  return fotmobLive ? "live" : "scheduled";
+}
+
+// True when a match is in progress and warrants a 30-second live refresh.
+// Includes half-time because the score can change once the second half starts.
+function isMatchInProgress(match, fotmobData) {
+  const phase = matchPhase(match, fotmobData);
+  return phase === "live" || phase === "halftime";
+}
+
+// Full-time score for a finished match: fd.org's when it has marked it
+// FINISHED, otherwise FotMob's. null when neither has one.
+function finalScore(match, fotmobData) {
+  if (match.status === "FINISHED") return match.score?.fullTime ?? null;
+  return fotmobData?.finished ?? null;
 }
 
 if (typeof module !== "undefined") {
-  module.exports = { normalizeTeam, getFotmobData, isMatchInProgress, _namesMatch, _teamVariants };
+  module.exports = { normalizeTeam, getFotmobData, isMatchInProgress, matchPhase, finalScore, parseFotmobMatch, _namesMatch, _teamVariants };
 }
