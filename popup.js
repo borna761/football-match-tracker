@@ -148,7 +148,8 @@ function teamEl(team, side) {
 function renderMatch(match, fotmobData) {
   const fotmobUrl = fotmobData?.url ?? fotmobData;
   const { status, score } = match;
-  const isFinished = status === "FINISHED";
+  // fd.org's status can lag by hours; FotMob's finished flag overrides it.
+  const isFinished = status === "FINISHED" || fotmobData?.finished != null;
   const inProgress = isMatchInProgress(status, fotmobData, isKickoffExpired(match.utcDate));
   const isHalfTime = status === "PAUSED" && inProgress;
   const isLive     = !isHalfTime && inProgress;
@@ -164,7 +165,7 @@ function renderMatch(match, fotmobData) {
   center.className = "match-time";
 
   if (isFinished) {
-    const ft = score.fullTime;
+    const ft = status === "FINISHED" ? score.fullTime : fotmobData.finished;
     const scoreEl = document.createElement("div");
     scoreEl.className = "match-score";
     scoreEl.textContent = `${ft.home ?? "?"} – ${ft.away ?? "?"}`;

@@ -92,6 +92,21 @@ function normalizeTeam(name) {
 const _fotmobCache = {};
 const FOTMOB_CACHE_TTL_MS = 5 * 60 * 1000;
 
+// Reduce a raw FotMob match to what the popup needs: link, live data while in
+// play, and the full-time score once it's over (cancelled matches don't count).
+function parseFotmobMatch(match) {
+  const st = match.status;
+  return {
+    url: `https://www.fotmob.com/match/${match.id}`,
+    live: st?.ongoing
+      ? { home: match.home?.score, away: match.away?.score, minute: st?.liveTime?.short ?? null }
+      : null,
+    finished: st?.finished && !st?.cancelled
+      ? { home: match.home?.score ?? null, away: match.away?.score ?? null }
+      : null,
+  };
+}
+
 // ── Fetch FotMob match URLs ───────────────────────────────────────────────────
 async function fetchFotmobUrls(dates) {
   const map = {};
@@ -127,12 +142,7 @@ async function fetchFotmobUrls(dates) {
         const aName = match.away?.name;
         if (!hName || !aName || !match.id) continue;
         const key = `${normalizeTeam(hName)}|${normalizeTeam(aName)}`;
-        dateMap[key] = {
-          url: `https://www.fotmob.com/match/${match.id}`,
-          live: match.status?.ongoing
-            ? { home: match.home?.score, away: match.away?.score, minute: match.status?.liveTime?.short ?? null }
-            : null,
-        };
+        dateMap[key] = parseFotmobMatch(match);
       }
     }
     // Only cache future dates — today must stay fresh for live scores
@@ -191,7 +201,7 @@ function getFotmobData(match, fotmobMap) {
 
   const home = match.homeTeam.shortName || match.homeTeam.name;
   const away = match.awayTeam.shortName || match.awayTeam.name;
-  return { url: `https://www.fotmob.com/search?q=${encodeURIComponent(`${home} ${away}`)}`, live: null };
+  return { url: `https://www.fotmob.com/search?q=${encodeURIComponent(`${home} ${away}`)}`, live: null, finished: null };
 }
 
 // Returns true when a match is in progress and warrants a 30-second live
@@ -201,6 +211,7 @@ function getFotmobData(match, fotmobMap) {
 // `kickoffExpired` guards against a stale fd.org IN_PLAY/PAUSED status: once
 // kickoff is long past, only FotMob's live data can keep the match "live".
 function isMatchInProgress(status, fotmobData, kickoffExpired = false) {
+  if (fotmobData?.finished) return false;
   if (status === "IN_PLAY" || status === "PAUSED") {
     return !kickoffExpired || fotmobData?.live != null;
   }
@@ -209,5 +220,5 @@ function isMatchInProgress(status, fotmobData, kickoffExpired = false) {
 }
 
 if (typeof module !== "undefined") {
-  module.exports = { normalizeTeam, getFotmobData, isMatchInProgress, _namesMatch, _teamVariants };
+  module.exports = { normalizeTeam, getFotmobData, isMatchInProgress, parseFotmobMatch, _namesMatch, _teamVariants };
 }

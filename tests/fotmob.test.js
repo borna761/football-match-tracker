@@ -1,4 +1,4 @@
-const { normalizeTeam, getFotmobData, isMatchInProgress, _namesMatch, _teamVariants } = require("../fotmob");
+const { normalizeTeam, getFotmobData, isMatchInProgress, parseFotmobMatch, _namesMatch, _teamVariants } = require("../fotmob");
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -220,5 +220,49 @@ describe("isMatchInProgress", () => {
 
   test("IN_PLAY before kickoff expiry stays in progress without FotMob live data", () => {
     expect(isMatchInProgress("IN_PLAY", noLive, false)).toBe(true);
+  });
+});
+
+describe("parseFotmobMatch", () => {
+  const base = { id: 4506, home: { name: "Nottingham Forest", score: 0 }, away: { name: "Arsenal", score: 1 } };
+
+  test("finished match exposes the full-time score and is not live", () => {
+    const r = parseFotmobMatch({ ...base, status: { finished: true, started: true, ongoing: false } });
+    expect(r.finished).toEqual({ home: 0, away: 1 });
+    expect(r.live).toBeNull();
+    expect(r.url).toBe("https://www.fotmob.com/match/4506");
+  });
+
+  test("ongoing match has live data and no finished score", () => {
+    const r = parseFotmobMatch({ ...base, status: { ongoing: true, liveTime: { short: "67'" } } });
+    expect(r.live).toEqual({ home: 0, away: 1, minute: "67'" });
+    expect(r.finished).toBeNull();
+  });
+
+  test("not-started match has neither", () => {
+    const r = parseFotmobMatch({ ...base, status: {} });
+    expect(r.live).toBeNull();
+    expect(r.finished).toBeNull();
+  });
+
+  test("cancelled match is not reported as finished", () => {
+    const r = parseFotmobMatch({ ...base, status: { finished: true, cancelled: true } });
+    expect(r.finished).toBeNull();
+  });
+});
+
+describe("isMatchInProgress — FotMob finished", () => {
+  const finished = { live: null, finished: { home: 0, away: 1 } };
+
+  test("stale IN_PLAY is not in progress when FotMob says finished", () => {
+    expect(isMatchInProgress("IN_PLAY", finished)).toBe(false);
+  });
+
+  test("stale PAUSED is not in progress when FotMob says finished", () => {
+    expect(isMatchInProgress("PAUSED", finished)).toBe(false);
+  });
+
+  test("stale TIMED is not in progress when FotMob says finished", () => {
+    expect(isMatchInProgress("TIMED", finished)).toBe(false);
   });
 });
