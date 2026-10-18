@@ -147,12 +147,11 @@ function teamEl(team, side) {
 
 function renderMatch(match, fotmobData) {
   const fotmobUrl = fotmobData?.url ?? fotmobData;
-  const { status, score } = match;
-  // fd.org's status can lag by hours; FotMob's finished flag overrides it.
-  const isFinished = status === "FINISHED" || fotmobData?.finished != null;
-  const inProgress = isMatchInProgress(status, fotmobData, isKickoffExpired(match.utcDate));
-  const isHalfTime = status === "PAUSED" && inProgress;
-  const isLive     = !isHalfTime && inProgress;
+  const { score } = match;
+  const phase      = matchPhase(match, fotmobData);
+  const isFinished = phase === "finished";
+  const isHalfTime = phase === "halftime";
+  const isLive     = phase === "live";
 
   const row = document.createElement("div");
   row.className = "match-row";
@@ -165,7 +164,7 @@ function renderMatch(match, fotmobData) {
   center.className = "match-time";
 
   if (isFinished) {
-    const ft = status === "FINISHED" ? score.fullTime : fotmobData.finished;
+    const ft = finalScore(match, fotmobData) ?? {};
     const scoreEl = document.createElement("div");
     scoreEl.className = "match-score";
     scoreEl.textContent = `${ft.home ?? "?"} – ${ft.away ?? "?"}`;
@@ -199,6 +198,12 @@ function renderMatch(match, fotmobData) {
       badge.textContent = "LIVE";
       center.appendChild(badge);
     }
+  } else if (phase === "finished-unconfirmed") {
+    // fd.org is stale and FotMob has no data: it's over, but the score is unknown
+    const ft = document.createElement("div");
+    ft.className = "match-time-value";
+    ft.textContent = "FT";
+    center.appendChild(ft);
   } else {
     const time = document.createElement("div");
     time.className = "match-time-value";
@@ -292,7 +297,7 @@ async function renderMatches(matches) {
           }
         }
         const fData = getFotmobData(match, fotmobMap);
-        if (isMatchInProgress(match.status, fData, isKickoffExpired(match.utcDate))) anyLive = true;
+        if (isMatchInProgress(match, fData)) anyLive = true;
         fragment.appendChild(renderMatch(match, fData));
       }
       return anchor;

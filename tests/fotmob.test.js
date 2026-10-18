@@ -1,4 +1,13 @@
-const { normalizeTeam, getFotmobData, isMatchInProgress, parseFotmobMatch, _namesMatch, _teamVariants } = require("../fotmob");
+// fotmob.js uses isoDate / isKickoffExpired from utils.js as globals (loaded before it in popup.html)
+Object.assign(global, require("../utils"));
+const { normalizeTeam, getFotmobData, isMatchInProgress: inProgressFor, matchPhase, finalScore, parseFotmobMatch, _namesMatch, _teamVariants } = require("../fotmob");
+
+const RECENT = () => new Date().toISOString();
+const LONG_AGO = () => new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString();
+// Wrapper so the status-based cases below read the same as before.
+function isMatchInProgress(status, fotmobData, kickoffExpired = false) {
+  return inProgressFor({ status, utcDate: kickoffExpired ? LONG_AGO() : RECENT() }, fotmobData);
+}
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -264,5 +273,74 @@ describe("isMatchInProgress — FotMob finished", () => {
 
   test("stale TIMED is not in progress when FotMob says finished", () => {
     expect(isMatchInProgress("TIMED", finished)).toBe(false);
+  });
+});
+
+describe("getFotmobData — date-qualified keys", () => {
+  const D1 = "2026-10-18", D2 = "2026-10-21";
+  const withDate = (utcDate) => ({ ...makeMatch("Arsenal", "Burnley"), utcDate });
+
+  test("picks the entry for the match's own date when the same teams meet twice", () => {
+    const map = {
+      [`${D1}|arsenal|burnley`]: { ...makeEntry(1), finished: { home: 2, away: 0 } },
+      [`${D2}|arsenal|burnley`]: { ...makeEntry(2), finished: null },
+    };
+    expect(getFotmobData(withDate(`${D2}T19:00:00Z`), map).finished).toBeNull();
+    expect(getFotmobData(withDate(`${D1}T15:00:00Z`), map).finished).toEqual({ home: 2, away: 0 });
+  });
+
+  test("fuzzy match is also restricted to the match's date", () => {
+    const map = { [`${D1}|inter|burnley`]: makeEntry(42) };
+    const m = { ...makeMatch("FC Internazionale Milano", "Burnley"), utcDate: `${D2}T19:00:00Z` };
+    expect(getFotmobData(m, map).url).toContain("fotmob.com/search");
+  });
+
+  test("falls back to search when the only entry is for another date", () => {
+    const map = { [`${D1}|arsenal|burnley`]: makeEntry(1) };
+    expect(getFotmobData(withDate(`${D2}T19:00:00Z`), map).url).toContain("fotmob.com/search");
+  });
+});
+
+describe("matchPhase", () => {
+  const live = { live: { home: 1, away: 0, minute: "67'" }, finished: null };
+  const none = { live: null, finished: null };
+  const done = { live: null, finished: { home: 0, away: 1 } };
+  const m = (status, utcDate = RECENT()) => ({ status, utcDate });
+
+  test("FINISHED is finished", () => expect(matchPhase(m("FINISHED"), none)).toBe("finished"));
+  test("FotMob finished overrides a stale IN_PLAY", () => expect(matchPhase(m("IN_PLAY", LONG_AGO()), done)).toBe("finished"));
+  test("recent IN_PLAY is live", () => expect(matchPhase(m("IN_PLAY"), none)).toBe("live"));
+  test("recent PAUSED is halftime", () => expect(matchPhase(m("PAUSED"), none)).toBe("halftime"));
+  test("TIMED with FotMob live data is live", () => expect(matchPhase(m("TIMED"), live)).toBe("live"));
+  test("TIMED without live data is scheduled", () => expect(matchPhase(m("TIMED"), none)).toBe("scheduled"));
+  test("expired IN_PLAY with FotMob live data is still live", () => expect(matchPhase(m("IN_PLAY", LONG_AGO()), live)).toBe("live"));
+  test("expired IN_PLAY with no FotMob data is finished-unconfirmed, not scheduled", () => {
+    expect(matchPhase(m("IN_PLAY", LONG_AGO()), none)).toBe("finished-unconfirmed");
+  });
+  test("expired PAUSED with no FotMob data is finished-unconfirmed", () => {
+    expect(matchPhase(m("PAUSED", LONG_AGO()), none)).toBe("finished-unconfirmed");
+  });
+});
+
+describe("isMatchInProgress — match object", () => {
+  test("live and halftime count, finished-unconfirmed does not", () => {
+    const none = { live: null, finished: null };
+    expect(inProgressFor({ status: "IN_PLAY", utcDate: RECENT() }, none)).toBe(true);
+    expect(inProgressFor({ status: "PAUSED", utcDate: RECENT() }, none)).toBe(true);
+    expect(inProgressFor({ status: "IN_PLAY", utcDate: LONG_AGO() }, none)).toBe(false);
+  });
+});
+
+describe("finalScore", () => {
+  test("uses fd.org's full-time score when status is FINISHED", () => {
+    const m = { status: "FINISHED", score: { fullTime: { home: 3, away: 1 } } };
+    expect(finalScore(m, { finished: { home: 9, away: 9 } })).toEqual({ home: 3, away: 1 });
+  });
+  test("uses FotMob's score when fd.org is stale", () => {
+    const m = { status: "IN_PLAY", score: { fullTime: { home: null, away: null } } };
+    expect(finalScore(m, { finished: { home: 0, away: 1 } })).toEqual({ home: 0, away: 1 });
+  });
+  test("is null when neither source has a final score", () => {
+    expect(finalScore({ status: "IN_PLAY", score: {} }, { finished: null })).toBeNull();
   });
 });
